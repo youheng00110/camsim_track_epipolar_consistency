@@ -1,0 +1,12 @@
+{
+  "plucker": "0plucker_special_noid_preview_paired_200_merged1000",
+  "box": "box30000_preview_paired_200_merged1000",
+  "implicit": "implicit_preview_paired_200_merged1000",
+  "full": "nuplanfull_preview_paired_200_merged1000",
+  "petr": "petr_preview_paired_200_merged1000",
+  "pvonly": "pvonly_preview_paired_200_merged1000",
+  "nocondition": "nocondition18000_preview_paired_200_merged1000",
+  "token18000": "tokenearly18000_preview_paired_200_merged1000",
+  "token24000": "tokenearly24000_preview_paired_200_merged1000",
+  "tvself": "tvself_preview_paired_200_merged1000"
+}

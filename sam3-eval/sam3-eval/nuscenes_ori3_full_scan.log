@@ -1,0 +1,24 @@
+[PREVIEW_SCAN_START] root=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_merged500 glob=stflow_manifest.jsonl
+[PREVIEW_MANIFESTS_FOUND] count=1
+[PREVIEW_SCAN_MANIFEST] 1/1 method=nuscenesablationori3_merged500
+[PREVIEW_SCAN_PROGRESS] images=10000 missing_generated=0 skipped_reference=1881
+[PREVIEW_AUTO_DISCOVERY] root=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_merged500 manifests=1 images=14400 skipped_reference=2700 missing_generated=0 missing_real=0
+[SHARED_BOX_SCAN_START] root=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection manifests=4
+[SHARED_BOX_MANIFEST] 1/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_00/box_manifest.jsonl
+[SHARED_BOX_MANIFEST] 2/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_01/box_manifest.jsonl
+[SHARED_BOX_MANIFEST] 3/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_02/box_manifest.jsonl
+[SHARED_BOX_MANIFEST] 4/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_03/box_manifest.jsonl
+[SHARED_BOX_INDEX] videos=300 views=17100 duplicates=0
+[SHARED_BOX_ATTACH] generated_frames=14400 matched=14400 missing=0 boxes_3d=354711
+{
+  "frames": 14400,
+  "shared_box_matched": 14400,
+  "shared_box_missing": 0,
+  "sources": {
+    "nuscenesablationori3_merged500": 14400
+  },
+  "first_image": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_merged500/images/nuscenes_video_000000/t003/CAM_00.jpg",
+  "first_box_image": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_00/images/nuscenes_video_000000/t003/CAM_00.jpg",
+  "last_image": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_merged500/images/nuscenes_video_000299/t018/CAM_02.jpg",
+  "last_box_image": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_03/images/nuscenes_video_000074/t018/CAM_02.jpg"
+}

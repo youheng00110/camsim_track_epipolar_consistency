@@ -1,0 +1,87 @@
+paths:
+  # 自动递归扫描该目录下全部 stflow_manifest.jsonl。
+  preview_root: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuplanhard1000
+  sam3_repo: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/sam3
+  checkpoint: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/ckpt/sam3.1/sam3.1_multiplex.pt
+  output_dir: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/output_nuplanhard1000
+
+preview:
+  manifest_glob: "**/*_merged1000/stflow_manifest.jsonl"
+  # generate_frames_for_reference=false 时，前几帧是复制的真实图；默认不纳入生成图评测。
+  skip_reference_frames: true
+  # 某些预览任务未完成时，跳过 manifest 中缺失的图片，而不是让整个扫描失败。
+  strict_paths: false
+  # 支持 shell 通配符，例如 ["*token*", "*plucker*"]；空列表表示全部方法。
+  include_methods: []
+  exclude_methods: []
+
+sources:
+  generated:
+    type: preview_generated
+    # 每个 manifest 父目录作为独立方法名，summary.json 会按方法分别汇总。
+    group_by_manifest: true
+  # box 尚未接入前先不重复跑 paired_real。
+  # real:
+  #   type: preview_real
+  #   group_by_manifest: false
+
+model:
+  version: sam3.1
+  prompts:
+    - car
+    - truck
+    - bus
+  confidence_threshold: 0.25
+  batch_size: 1
+  loader_workers: 4
+  precision: bfloat16
+  input_resolution: 1008
+  save_masks: true
+  mask_resolution: 256
+  mask_threshold: 0.5
+  max_detections_per_prompt: 100
+  max_detections_per_image: 150
+  nms_iou_threshold: 0.70
+  checkpoint_minimum_coverage: 0.95
+  checkpoint_mmap: true
+
+annotation:
+  classes:
+    - CAR
+    - TRUCK
+    - BUS
+  near_plane: 0.10
+  min_projected_height_px: 8.0
+  min_projected_area_px: 64.0
+  min_in_frame_fraction: 0.10
+
+visibility:
+  min_gt_visible_ratio: 0.15
+  min_gt_visible_connected_pixels: 4
+
+matching:
+  min_mask_iou: 0.05
+  max_center_error_norm: 0.80
+  max_scale_error_log: 1.20
+  max_cost: 1.10
+  cost_mask_iou: 0.65
+  cost_center: 0.20
+  cost_bottom: 0.05
+  cost_scale: 0.10
+  allow_bbox_mask_fallback: false
+
+visualization:
+  enabled: true
+  max_frames_per_source: 16
+  image_quality: 92
+  mask_alpha: 0.25
+  draw_cuboid: false
+  draw_detection_box: true
+  draw_filtered_small_sam: true
+
+runtime:
+  seed: 3407
+  backend: sam3.1
+  # 这里按单相机图片计数；0 表示全部。
+  limit_frames: 0
+  overwrite: true

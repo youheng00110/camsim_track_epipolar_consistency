@@ -135,7 +135,7 @@
             "memory_efficient_batch": 12
         },
         "training_config": {
-            "text_prompt_condition_ratio": 0,
+            "text_prompt_condition_ratio": 0.8,
             "3dbox_condition_ratio": 0.8,
             "explicit_view_modeling_ratio": 0.8,
             "reference_frame_count": 3,

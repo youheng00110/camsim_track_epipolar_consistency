@@ -1,0 +1,45 @@
+{
+    "global_state": {
+        "nuscenes_fs": {
+            "_class_name": "fsspec.implementations.dirfs.DirFileSystem",
+            "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nus_local",
+            "fs": {
+                "_class_name": "dwm.fs.dirfs.DirFileSystem"
+            }
+        }
+    },
+    "validation_dataset": {
+        "_class_name": "dwm.datasets.common.DatasetAdapter",
+        "base_dataset": {
+            "_class_name": "torch.utils.data.ConcatDataset",
+            "datasets": [
+                {
+                    "_class_name": "dwm.datasets.nuscenes.MotionDataset",
+                    "fs": {
+                        "_class_name": "dwm.common.get_state",
+                        "key": "nuscenes_fs"
+                    },
+                    "dataset_name": "interp_12Hz_trainval",
+                    "split": "val",
+                    "sequence_length": 100,
+                    "fps_stride_tuples": [
+                        [6, 20, 0.9]
+                    ],
+                    "sensor_channels": [
+                        "CAM_FRONT_LEFT",
+                        "CAM_FRONT",
+                        "CAM_FRONT_RIGHT",
+                        "CAM_BACK_RIGHT",
+                        "CAM_BACK",
+                        "CAM_BACK_LEFT"
+                    ],
+                    "keyframe_only": true,
+                    "enable_synchronization_check": false,
+                    "enable_camera_transforms": true,
+                    "enable_ego_transforms": true
+        
+                }
+            ]
+        }
+    }
+}

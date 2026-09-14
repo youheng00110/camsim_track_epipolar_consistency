@@ -1,0 +1,51 @@
+[PREVIEW_SCAN_START] root=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_merged500 glob=stflow_manifest.jsonl
+[PREVIEW_MANIFESTS_FOUND] count=1
+[PREVIEW_SCAN_MANIFEST] 1/1 method=nuscenesablationori3_merged500
+[PREVIEW_AUTO_DISCOVERY] root=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_merged500 manifests_seen=1 images=32 limited_to=32
+[SHARED_BOX_SCAN_START] root=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection manifests=4
+[SHARED_BOX_MANIFEST] 1/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_00/box_manifest.jsonl
+[SHARED_BOX_MANIFEST] 2/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_01/box_manifest.jsonl
+[SHARED_BOX_MANIFEST] 3/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_02/box_manifest.jsonl
+[SHARED_BOX_MANIFEST] 4/4 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_box/box_projection/rank_03/box_manifest.jsonl
+[SHARED_BOX_INDEX] videos=300 views=17100 duplicates=0
+[SHARED_BOX_ATTACH] generated_frames=32 matched=32 missing=0 boxes_3d=1159
+/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+Imported sam3 from /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/sam3/sam3/__init__.py
+Loaded checkpoint coverage=100.00% tensors=1166/1166
+rank 0 eval:   0%|          | 0/32 [00:00<?, ?it/s]rank 0 eval:   3%|▎         | 1/32 [00:01<00:44,  1.42s/it]rank 0 eval:   6%|▋         | 2/32 [00:01<00:22,  1.35it/s]rank 0 eval:   9%|▉         | 3/32 [00:01<00:13,  2.19it/s]rank 0 eval:  12%|█▎        | 4/32 [00:01<00:09,  3.05it/s]rank 0 eval:  16%|█▌        | 5/32 [00:02<00:07,  3.70it/s]rank 0 eval:  19%|█▉        | 6/32 [00:02<00:05,  4.57it/s]rank 0 eval:  22%|██▏       | 7/32 [00:02<00:04,  5.36it/s]rank 0 eval:  25%|██▌       | 8/32 [00:02<00:04,  5.56it/s]rank 0 eval:  28%|██▊       | 9/32 [00:02<00:03,  6.24it/s]rank 0 eval:  31%|███▏      | 10/32 [00:02<00:03,  6.73it/s]rank 0 eval:  34%|███▍      | 11/32 [00:02<00:03,  6.52it/s]rank 0 eval:  38%|███▊      | 12/32 [00:03<00:02,  7.01it/s]rank 0 eval:  41%|████      | 13/32 [00:03<00:02,  7.36it/s]rank 0 eval:  44%|████▍     | 14/32 [00:03<00:02,  6.93it/s]rank 0 eval:  47%|████▋     | 15/32 [00:03<00:02,  7.30it/s]rank 0 eval:  50%|█████     | 16/32 [00:03<00:02,  7.59it/s]rank 0 eval:  53%|█████▎    | 17/32 [00:03<00:02,  7.14it/s]rank 0 eval:  56%|█████▋    | 18/32 [00:03<00:01,  7.48it/s]rank 0 eval:  59%|█████▉    | 19/32 [00:03<00:01,  7.69it/s]rank 0 eval:  62%|██████▎   | 20/32 [00:04<00:01,  7.42it/s]rank 0 eval:  66%|██████▌   | 21/32 [00:04<00:01,  7.69it/s]rank 0 eval:  69%|██████▉   | 22/32 [00:04<00:01,  7.90it/s]rank 0 eval:  72%|███████▏  | 23/32 [00:04<00:01,  7.33it/s]rank 0 eval:  75%|███████▌  | 24/32 [00:04<00:01,  7.62it/s]rank 0 eval:  78%|███████▊  | 25/32 [00:04<00:00,  7.81it/s]rank 0 eval:  81%|████████▏ | 26/32 [00:04<00:00,  7.56it/s]rank 0 eval:  84%|████████▍ | 27/32 [00:04<00:00,  7.81it/s]rank 0 eval:  88%|████████▊ | 28/32 [00:05<00:00,  7.57it/s]rank 0 eval:  91%|█████████ | 29/32 [00:05<00:00,  7.25it/s]rank 0 eval:  94%|█████████▍| 30/32 [00:05<00:00,  7.39it/s]rank 0 eval:  97%|█████████▋| 31/32 [00:05<00:00,  7.62it/s]rank 0 eval: 100%|██████████| 32/32 [00:05<00:00,  7.36it/s]rank 0 eval: 100%|██████████| 32/32 [00:05<00:00,  5.63it/s]
+{
+  "model": {
+    "checkpoint_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/ckpt/sam3.1/sam3.1_multiplex.pt",
+    "parameter_coverage": 1.0,
+    "loaded_tensors": 1166,
+    "model_tensors": 1166,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "shape_mismatches": [],
+    "backend": "sam3.1",
+    "rank": 0,
+    "world_size": 1
+  },
+  "sources": {
+    "nuscenesablationori3_merged500": {
+      "frames": 32,
+      "raw_gt_count": 33,
+      "ignored_occluded_gt_count": 0,
+      "gt_count": 33,
+      "gt_evaluation_fraction": 1.0,
+      "raw_detection_count": 45,
+      "filtered_small_detection_count": 0,
+      "detection_count": 45,
+      "matched_count": 23,
+      "recall": 0.696969696969697,
+      "precision": 0.5111111111111111,
+      "f1": 0.5897435897435898,
+      "mean_mask_iou": 0.46599244359958153,
+      "mean_center_error_norm": 0.1606454530261034,
+      "mean_bottom_error_norm": 0.7412634719586121,
+      "mean_scale_error_log": 0.4180582069471452
+    }
+  }
+}
+Results saved to /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/sam3_nuscenes_ori3_box3d_test32

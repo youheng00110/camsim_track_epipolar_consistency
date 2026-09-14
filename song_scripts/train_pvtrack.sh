@@ -23,5 +23,5 @@ torchrun \
   -o /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/song_output/pvtrack \
   --log-steps 300 \
   --preview-steps 1000 \
-  --checkpointing-steps 4000 \
+  --checkpointing-steps 2000 \
   --evaluation-steps 200000

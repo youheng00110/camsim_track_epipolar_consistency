@@ -661,6 +661,7 @@ class MotionDataset(torch.utils.data.Dataset):
         hdmap_image_settings=None,
         layout_token_settings: dict = None,
         hdmap_bev_settings=None,
+        enable_3dbox_records: bool = False,
         instance_flow_image_settings=None,
         
     ):
@@ -681,6 +682,7 @@ class MotionDataset(torch.utils.data.Dataset):
         self.hdmap_image_settings = hdmap_image_settings
         self.hdmap_bev_settings = hdmap_bev_settings
         self.instance_flow_image_settings = instance_flow_image_settings
+        self.enable_3dbox_records = bool(enable_3dbox_records)
         for fps_stride_cfg in fps_stride_tuples:
             if len(fps_stride_cfg) == 2:
                 fps, stride = fps_stride_cfg
@@ -2155,6 +2157,14 @@ class MotionDataset(torch.utils.data.Dataset):
         result["camera_intrinsics"] = camera_intr
         result["image_size"] = torch.tensor(np.asarray([[[w,h] for (w,h) in row] for row in img_sizes]), dtype=torch.long)
 
+
+        # Instance-level GT boxes for evaluation export.
+        # Variable-length Python nested list: [T][N_t][record].
+        if self.enable_3dbox_records:
+            result["3dbox_records"] = [
+                self._get_3dbox_records_from_gtline(frame_info)
+                for frame_info in seq
+            ]
 
         lidar_to_camera = []
 

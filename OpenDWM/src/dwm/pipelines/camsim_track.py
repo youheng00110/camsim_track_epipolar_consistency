@@ -2925,6 +2925,125 @@ class CrossviewTemporalSD():
 
         return result
 
+    def _export_box_eval_artifacts(
+        self,
+        batch: dict,
+        default_export_root: str,
+        dist_on: bool,
+        rank: int,
+        all_rank_preview: bool,
+    ):
+        export_box_image = bool(
+            self.inference_config.get(
+                "eval_frame_export_box_image", False
+            )
+        )
+
+        export_box_params = bool(
+            self.inference_config.get(
+                "eval_frame_export_box_params", False
+            )
+        )
+
+        if not export_box_image and not export_box_params:
+            return
+
+        if "3dbox_images" not in batch:
+            raise KeyError(
+                "Box export requires batch['3dbox_images']."
+            )
+
+        box_key = self.inference_config.get(
+            "eval_frame_box_key",
+            "3dbox_records",
+        )
+
+        if export_box_params and box_key not in batch:
+            raise KeyError(
+                "Box parameter export requires batch[{!r}].".format(
+                    box_key
+                )
+            )
+
+        lidar_to_camera_key = self.inference_config.get(
+            "eval_frame_lidar_to_camera_key",
+            "lidar_to_camera",
+        )
+
+        if export_box_params and lidar_to_camera_key not in batch:
+            raise KeyError(
+                "Box parameter export requires batch[{!r}].".format(
+                    lidar_to_camera_key
+                )
+            )
+
+        box_export_root = self.inference_config.get(
+            "eval_frame_box_export_path",
+            None,
+        )
+
+        if box_export_root is None:
+            if default_export_root is None:
+                raise KeyError(
+                    "Box export requires eval_frame_export_path or "
+                    "eval_frame_box_export_path."
+                )
+
+            box_export_root = os.path.join(
+                default_export_root,
+                self.inference_config.get(
+                    "eval_frame_box_export_subdir",
+                    "box",
+                ),
+            )
+
+        if all_rank_preview and dist_on:
+            box_export_root = os.path.join(
+                box_export_root,
+                "rank_{:02d}".format(rank),
+            )
+
+        box_export_config = dict(self.inference_config)
+
+        box_export_config[
+            "eval_frame_export_box_image"
+        ] = export_box_image
+
+        box_export_config[
+            "eval_frame_export_box_params"
+        ] = export_box_params
+
+        dwm.utils.preview.save_ctsd_eval_frames_for_preview(
+            batch["3dbox_images"],
+            batch,
+            box_export_config,
+            output_dir=box_export_root,
+            dataset_name=self.inference_config.get(
+                "eval_frame_dataset_name",
+                "unknown",
+            ),
+            manifest_name=self.inference_config.get(
+                "eval_frame_box_manifest_name",
+                "box_manifest.jsonl",
+            ),
+            image_quality=self.inference_config.get(
+                "eval_frame_box_image_quality",
+                self.inference_config.get(
+                    "eval_frame_image_quality",
+                    95,
+                ),
+            ),
+            export_paired_real=False,
+        )
+
+        print(
+            "[BOX_EVAL_EXPORT] rank={} saved box artifacts to {}".format(
+                rank,
+                box_export_root,
+            ),
+            flush=True,
+        )
+
     @torch.no_grad()
     def preview_pipeline(
         self, batch: dict, output_path: str, global_step: int
@@ -3086,10 +3205,14 @@ class CrossviewTemporalSD():
                         "rank_{:02d}".format(rank),
                     )
 
+                rgb_export_config = dict(self.inference_config)
+                rgb_export_config["eval_frame_export_box_image"] = False
+                rgb_export_config["eval_frame_export_box_params"] = False
+
                 dwm.utils.preview.save_ctsd_eval_frames_for_preview(
                     preview_images,
                     batch,
-                    self.inference_config,
+                    rgb_export_config,
                     output_dir=eval_frame_export_path,
                     dataset_name=self.inference_config.get(
                         "eval_frame_dataset_name", "unknown"
@@ -3103,6 +3226,17 @@ class CrossviewTemporalSD():
                     export_paired_real=self.inference_config.get(
                         "eval_frame_export_paired_real", True
                     ),
+                )
+
+                self._export_box_eval_artifacts(
+                    batch,
+                    self.inference_config.get(
+                        "eval_frame_export_path",
+                        None,
+                    ),
+                    dist_on,
+                    rank,
+                    all_rank_preview,
                 )
 
             if preview_images.ndim == 4:
@@ -3203,6 +3337,89 @@ class CrossviewTemporalSD():
                 )
                 pipeline_output = self.inference_pipeline(
                     latent_shape, batch, "pt")
+
+            dist_on = (
+                torch.distributed.is_available() and
+                torch.distributed.is_initialized()
+            )
+
+            rank = torch.distributed.get_rank() if dist_on else 0
+
+            all_rank_preview = bool(
+                self.inference_config.get(
+                    "all_rank_preview",
+                    False,
+                )
+            )
+
+            save_this_rank = self.should_save or (
+                dist_on and all_rank_preview
+            )
+
+            if save_this_rank:
+                current_export_path = self.inference_config.get(
+                    "eval_frame_export_path",
+                    None,
+                )
+
+                if current_export_path is not None:
+                    if all_rank_preview and dist_on:
+                        current_export_path = os.path.join(
+                            current_export_path,
+                            "rank_{:02d}".format(rank),
+                        )
+
+                    rgb_export_config = dict(self.inference_config)
+
+                    rgb_export_config[
+                        "eval_frame_export_box_image"
+                    ] = False
+
+                    rgb_export_config[
+                        "eval_frame_export_box_params"
+                    ] = False
+
+                    dwm.utils.preview.save_ctsd_eval_frames_for_preview(
+                        pipeline_output["images"],
+                        batch,
+                        rgb_export_config,
+                        output_dir=current_export_path,
+                        dataset_name=self.inference_config.get(
+                            "eval_frame_dataset_name",
+                            "unknown",
+                        ),
+                        manifest_name=self.inference_config.get(
+                            "eval_frame_manifest_name",
+                            "stflow_manifest.jsonl",
+                        ),
+                        image_quality=self.inference_config.get(
+                            "eval_frame_image_quality",
+                            95,
+                        ),
+                        export_paired_real=self.inference_config.get(
+                            "eval_frame_export_paired_real",
+                            True,
+                        ),
+                    )
+
+                    self._export_box_eval_artifacts(
+                        batch,
+                        self.inference_config.get(
+                            "eval_frame_export_path",
+                            None,
+                        ),
+                        dist_on,
+                        rank,
+                        all_rank_preview,
+                    )
+
+                    print(
+                        "[EVAL_FRAME_EXPORT] rank={} saved RGB to {}".format(
+                            rank,
+                            current_export_path,
+                        ),
+                        flush=True,
+                    )
 
             if "fid" in self.metrics:
                 fake_images = pipeline_output["images"]\
