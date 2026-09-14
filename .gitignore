@@ -1,0 +1,30 @@
+# Outputs
+lyh_output/
+song_output/
+
+# Third-party code
+nuplan-devkit-master/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Logs / cache / experiment artifacts
+wandb/
+logs/
+.cache/
+output/
+outputs/
+checkpoints/
+
+# Model weights
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# IDE
+.vscode/
+.idea/

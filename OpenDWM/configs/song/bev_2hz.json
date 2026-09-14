@@ -1,0 +1,865 @@
+{
+    "device": "cuda",
+    "ddp_backend": "nccl",
+    "train_epochs": 20,
+    "generator_seed": 0,
+    "same_dataset_per_global_batch": true,
+    "data_shuffle": true,
+    "fix_training_data_order": true,
+    "global_state": {
+        "nuscenes_fs": {
+            "_class_name": "fsspec.implementations.dirfs.DirFileSystem",
+            "path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh",
+            "fs": {
+                "_class_name": "dwm.fs.dirfs.DirFileSystem"
+            }
+        },
+        "device_mesh": {
+            "_class_name": "torch.distributed.device_mesh.init_device_mesh",
+            "device_type": "cuda",
+            "mesh_shape": [
+                1,
+                8
+            ]
+        }
+    },
+    "optimizer": {
+        "_class_name": "torch.optim.AdamW",
+        "lr": 6e-05
+    },
+    "pipeline": {
+        "_class_name": "dwm.pipelines.bev.BEVPipeline",
+        "common_config": {
+            "distribution_framework": "fsdp",
+            "print_load_state_info": true,
+            "memory_efficient_batch": 12,
+            "fsdp_settings": {
+                "sharding_strategy": {
+                    "_class_name": "torch.distributed.fsdp.ShardingStrategy",
+                    "value": 4
+                },
+                "device_mesh": {
+                    "_class_name": "dwm.common.get_state",
+                    "key": "device_mesh"
+                },
+                "mixed_precision": {
+                    "_class_name": "torch.distributed.fsdp.MixedPrecision",
+                    "param_dtype": {
+                        "_class_name": "get_class",
+                        "class_name": "torch.float16"
+                    }
+                }
+            }
+        },
+        "training_config": {
+            "reference_frame_count": 3,
+            "generation_task_ratio": 0.2,
+            "image_generation_ratio": 0.5,
+            "all_reference_visible_ratio": 0.5,
+            "reference_visible_rate": 0.5,
+            "condition_dropout_ratio": 0.15,
+            "disable_reference_frame_loss": true
+        },
+        "inference_config": {
+            "scheduler": "dwm.schedulers.temporal_independent.FlowMatchEulerDiscreteScheduler",
+            "guidance_scale": 2.0,
+            "inference_steps": 38,
+            "preview_image_size": [
+                512,
+                288
+            ],
+            "generate_frames_for_reference": false,
+            "sequence_length_per_iteration": 19,
+            "reference_frame_count": 3,
+            "autoregressive_stride": 16,
+            "autoregression_data_exception_for_take_sequence": [
+                "crossview_mask"
+            ],
+            "evaluation_item_count": 480
+        },
+        "model": {
+            "_class_name": "dwm.models.bev_models.dit.BEVConditionedSD3TransformerModel",
+            "attention_head_dim": 64,
+            "caption_projection_dim": 1536,
+            "in_channels": 16,
+            "joint_attention_dim": 4096,
+            "num_attention_heads": 24,
+            "num_layers": 24,
+            "out_channels": 16,
+            "patch_size": 2,
+            "pooled_projection_dim": 2048,
+            "pos_embed_max_size": 192,
+            "sample_size": 128,
+            "block_layers": [
+                1,
+                5,
+                9,
+                13,
+                17,
+                21
+            ],
+            "merge_factor": 2.0,
+            "bev_in_channels": 13,
+            "bev_hidden_channels": 256,
+            "trajectory_translation_scale": 10.0,
+            "bbox_config": {
+                "num_classes": 10,
+                "points_per_box": 8,
+                "num_freqs": 4,
+                "hidden_dim": 768,
+                "class_dim": 768,
+                "temporal_depth": 1,
+                "temporal_heads": 8,
+                "position_min": [
+                    -80.0,
+                    -80.0,
+                    -5.0
+                ],
+                "position_range": [
+                    160.0,
+                    160.0,
+                    10.0
+                ]
+            }
+        },
+        "pretrained_model_name_or_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/lyhmigration/stable-diffusion-3-medium",
+        "model_checkpoint_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/train_nuplantokensinglefixed3/checkpoints/50000_map13_from_map3.pth",
+        "model_load_state_args": {
+            "strict": false
+        },
+        "metrics": {
+            "fid": {
+                "_class_name": "torchmetrics.image.fid.FrechetInceptionDistance",
+                "normalize": true
+            },
+            "fvd": {
+                "_class_name": "dwm.metrics.fvd.FrechetVideoDistance",
+                "inception_3d_checkpoint_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/ckpt/i3d_pretrained_400.pt",
+                "sequence_count": 19
+            }
+        }
+    },
+    "training_dataset": {
+        "_class_name": "dwm.datasets.common.DatasetAdapter",
+        "default_height": 288,
+        "default_width": 512,
+        "base_dataset": {
+            "_class_name": "torch.utils.data.ConcatDataset",
+            "datasets": [
+                {
+                    "_class_name": "dwm.datasets.bevs.waymo.MotionDataset",
+                    "fs": {
+                        "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                        "path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/waymo_link"
+                    },
+                    "split": "training",
+                    "dataset_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/waymo_link",
+                    "balanced_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/waymo_balanced/balanced_windows_metadata.json",
+                    "info_dict_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/waymo_balanced/training.info.json",
+                    "sequence_length": 20,
+                    "fps_stride_tuples": [
+                        [
+                            6,
+                            2.5,
+                            0.95
+                        ],
+                        [
+                            2,
+                            3,
+                            0.39
+                        ]
+                    ],
+                    "sensor_channels": [
+                        "LIDAR_TOP",
+                        "CAM_FRONT_LEFT",
+                        "CAM_FRONT_LEFT",
+                        "CAM_FRONT_RIGHT",
+                        "CAM_FRONT_RIGHT",
+                        "CAM_SIDE_LEFT",
+                        "CAM_FRONT",
+                        "CAM_FRONT",
+                        "CAM_SIDE_RIGHT"
+                    ],
+                    "hdmap_bev_settings": {
+                        "bev_size": [
+                            256,
+                            256
+                        ],
+                        "bev_from_ego_transform": [
+                            [
+                                1.6,
+                                0.0,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                -1.6,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                -1.6,
+                                0.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                0.0,
+                                1.0
+                            ]
+                        ]
+                    },
+                    "stub_key_data_dict": {
+                        "crossview_mask": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": {
+                                    "_class_name": "json.loads",
+                                    "s": "[[1,0,0,0,1,0,0,0],[0,1,0,0,0,0,0,0],[1,0,0,0,1,1,0,0],[0,0,0,1,0,0,0,0],[1,0,1,0,0,1,0,0],[0,0,1,0,0,1,0,1],[0,0,0,0,0,0,1,0],[0,0,1,0,0,0,0,1]]"
+                                },
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.bool"
+                                }
+                            }
+                        ],
+                        "dataset_tag": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": 2,
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.int64"
+                                }
+                            }
+                        ]
+                    },
+                    "max_boxes": 64
+                },
+                {
+                    "_class_name": "dwm.datasets.bevs.nuscenes.MotionDataset",
+                    "fs": {
+                        "_class_name": "dwm.common.get_state",
+                        "key": "nuscenes_fs"
+                    },
+                    "dataset_name": "interp_12Hz_trainval",
+                    "split": "train",
+                    "sequence_length": 20,
+                    "fps_stride_tuples": [
+                        [
+                            6,
+                            2.5,
+                            0.95
+                        ],
+                        [
+                            2,
+                            3,
+                            0.39
+                        ]
+                    ],
+                    "sensor_channels": [
+                        "LIDAR_TOP",
+                        "CAM_FRONT_LEFT",
+                        "CAM_FRONT_LEFT",
+                        "CAM_FRONT",
+                        "CAM_FRONT",
+                        "CAM_FRONT_RIGHT",
+                        "CAM_BACK_RIGHT",
+                        "CAM_BACK",
+                        "CAM_BACK_LEFT"
+                    ],
+                    "hdmap_bev_settings": {
+                        "bev_size": [
+                            256,
+                            256
+                        ],
+                        "bev_from_ego_transform": [
+                            [
+                                1.6,
+                                0.0,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                -1.6,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                -1.6,
+                                0.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                0.0,
+                                1.0
+                            ]
+                        ]
+                    },
+                    "stub_key_data_dict": {
+                        "crossview_mask": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": {
+                                    "_class_name": "json.loads",
+                                    "s": "[[1,0,1,0,0,0,0,1],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[1,0,0,0,0,0,1,1]]"
+                                },
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.bool"
+                                }
+                            }
+                        ],
+                        "dataset_tag": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": 1,
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.int64"
+                                }
+                            }
+                        ]
+                    },
+                    "max_boxes": 64
+                },
+                {
+                    "_class_name": "dwm.datasets.bevs.argoverse.MotionDataset",
+                    "fs": {
+                        "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_link"
+                        },
+                        "enable_cached_info": true
+                    },
+                    "split": "train",
+                    "dataset_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_link",
+                    "index_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_json",
+                    "balanced_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_balanced/balanced_windows.json",
+                    "sequence_length": 20,
+                    "fps_stride_tuples": [
+                        [
+                            6,
+                            2.5,
+                            0.95
+                        ],
+                        [
+                            2,
+                            3,
+                            0.39
+                        ]
+                    ],
+                    "sensor_channels": [
+                        "lidar",
+                        "cameras/ring_front_center",
+                        "cameras/ring_front_center",
+                        "cameras/ring_front_left",
+                        "cameras/ring_front_right",
+                        "cameras/ring_side_right",
+                        "cameras/ring_rear_right",
+                        "cameras/ring_rear_left",
+                        "cameras/ring_side_left"
+                    ],
+                    "hdmap_bev_settings": {
+                        "bev_size": [
+                            256,
+                            256
+                        ],
+                        "bev_from_ego_transform": [
+                            [
+                                1.6,
+                                0.0,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                -1.6,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                -1.6,
+                                0.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                0.0,
+                                1.0
+                            ]
+                        ]
+                    },
+                    "stub_key_data_dict": {
+                        "crossview_mask": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": {
+                                    "_class_name": "json.loads",
+                                    "s": "[[1,0,1,1,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,0,0,0,1],[1,0,0,1,1,0,0,0],[0,0,0,1,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[0,0,1,0,0,0,1,1]]"
+                                },
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.bool"
+                                }
+                            }
+                        ],
+                        "dataset_tag": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": 3,
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.int64"
+                                }
+                            }
+                        ]
+                    },
+                    "max_boxes": 64
+                },
+                {
+                    "_class_name": "dwm.datasets.bevs.argoverse.MotionDataset",
+                    "fs": {
+                        "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_link"
+                        },
+                        "enable_cached_info": true
+                    },
+                    "split": "train",
+                    "dataset_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_link",
+                    "index_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_json",
+                    "balanced_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_balanced/balanced_windows.json",
+                    "sequence_length": 20,
+                    "fps_stride_tuples": [
+                        [
+                            6,
+                            2.5,
+                            0.95
+                        ],
+                        [
+                            2,
+                            3,
+                            0.39
+                        ]
+                    ],
+                    "sensor_channels": [
+                        "lidar",
+                        "cameras/ring_front_left",
+                        "cameras/ring_front_left",
+                        "cameras/ring_front_center",
+                        "cameras/ring_front_center",
+                        "cameras/ring_front_right",
+                        "cameras/ring_front_right",
+                        "cameras/ring_rear_right",
+                        "cameras/ring_rear_left"
+                    ],
+                    "hdmap_bev_settings": {
+                        "bev_size": [
+                            256,
+                            256
+                        ],
+                        "bev_from_ego_transform": [
+                            [
+                                1.6,
+                                0.0,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                -1.6,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                -1.6,
+                                0.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                0.0,
+                                1.0
+                            ]
+                        ]
+                    },
+                    "stub_key_data_dict": {
+                        "crossview_mask": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": {
+                                    "_class_name": "json.loads",
+                                    "s": "[[1,0,1,0,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,0,1,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,1,1],[0,0,0,0,0,0,1,1]]"
+                                },
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.bool"
+                                }
+                            }
+                        ],
+                        "dataset_tag": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": 3,
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.int64"
+                                }
+                            }
+                        ]
+                    },
+                    "max_boxes": 64
+                },
+                {
+                    "_class_name": "dwm.datasets.bevs.argoverse.MotionDataset",
+                    "fs": {
+                        "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_link"
+                        },
+                        "enable_cached_info": true
+                    },
+                    "split": "train",
+                    "dataset_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_link",
+                    "index_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_json",
+                    "balanced_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/avrgo2_balanced/balanced_windows.json",
+                    "sequence_length": 20,
+                    "fps_stride_tuples": [
+                        [
+                            6,
+                            2.5,
+                            0.95
+                        ],
+                        [
+                            2,
+                            3,
+                            0.39
+                        ]
+                    ],
+                    "sensor_channels": [
+                        "lidar",
+                        "cameras/ring_side_left",
+                        "cameras/ring_side_left",
+                        "cameras/ring_front_center",
+                        "cameras/ring_front_center",
+                        "cameras/ring_side_right",
+                        "cameras/ring_side_right",
+                        "cameras/ring_rear_right",
+                        "cameras/ring_rear_left"
+                    ],
+                    "hdmap_bev_settings": {
+                        "bev_size": [
+                            256,
+                            256
+                        ],
+                        "bev_from_ego_transform": [
+                            [
+                                1.6,
+                                0.0,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                -1.6,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                -1.6,
+                                0.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                0.0,
+                                1.0
+                            ]
+                        ]
+                    },
+                    "stub_key_data_dict": {
+                        "crossview_mask": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": {
+                                    "_class_name": "json.loads",
+                                    "s": "[[1,0,1,0,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,0,1,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,1,1],[0,0,0,0,0,0,1,1]]"
+                                },
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.bool"
+                                }
+                            }
+                        ],
+                        "dataset_tag": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": 3,
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.int64"
+                                }
+                            }
+                        ]
+                    },
+                    "max_boxes": 64
+                }
+            ]
+        },
+        "transform_list": [
+            {
+                "old_key": "images",
+                "new_key": "vae_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "hdmap_bev_images",
+                "new_key": "hdmap_bev_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "3dbox_images",
+                "new_key": "3dbox_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            }
+        ],
+        "pop_list": [
+            "images"
+        ]
+    },
+    "validation_dataset": {
+        "_class_name": "dwm.datasets.common.DatasetAdapter",
+        "default_height": 288,
+        "default_width": 512,
+        "base_dataset": {
+            "_class_name": "torch.utils.data.ConcatDataset",
+            "datasets": [
+                {
+                    "_class_name": "dwm.datasets.bevs.nuplan.MotionDataset",
+                    "sensor_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/nuplan_prepo/mini_sensors",
+                    "pkl_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/nuplan_prepo/mini_infos_val.pkl",
+                    "cache_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/nuplan_cache",
+                    "dataset_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/nuplan_link/plan_data/mini",
+                    "map_root": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/nuplan_link/maps",
+                    "balanced_json_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/nuplan_balanced/val_nonidle_windows_metadata.json",
+                    "sequence_length": 19,
+                    "fps_stride_tuples": [
+                        [
+                            2,
+                            8,
+                            0.1
+                        ]
+                    ],
+                    "sensor_channels": [
+                        "CAM_L2",
+                        "CAM_L1",
+                        "CAM_L0",
+                        "CAM_F0",
+                        "CAM_R0",
+                        "CAM_R1",
+                        "CAM_R2",
+                        "CAM_B0"
+                    ],
+                    "hdmap_bev_settings": {
+                        "bev_size": [
+                            256,
+                            256
+                        ],
+                        "bev_from_ego_transform": [
+                            [
+                                1.6,
+                                0.0,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                -1.6,
+                                0.0,
+                                128.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                -1.6,
+                                0.0
+                            ],
+                            [
+                                0.0,
+                                0.0,
+                                0.0,
+                                1.0
+                            ]
+                        ]
+                    },
+                    "stub_key_data_dict": {
+                        "crossview_mask": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": {
+                                    "_class_name": "json.loads",
+                                    "s": "[[1,1,0,0,0,0,0,1],[1,1,1,0,0,0,0,0],[0,1,1,1,0,0,0,0],[0,0,1,1,1,0,0,0],[0,0,0,1,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[1,0,0,0,0,0,1,1]]"
+                                },
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.bool"
+                                }
+                            }
+                        ],
+                        "dataset_tag": [
+                            "content",
+                            {
+                                "_class_name": "torch.tensor",
+                                "data": 0,
+                                "dtype": {
+                                    "_class_name": "get_class",
+                                    "class_name": "torch.int64"
+                                }
+                            }
+                        ]
+                    },
+                    "max_boxes": 64
+                }
+            ]
+        },
+        "transform_list": [
+            {
+                "old_key": "images",
+                "new_key": "vae_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "3dbox_images",
+                "new_key": "3dbox_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "hdmap_bev_images",
+                "new_key": "hdmap_bev_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            }
+        ],
+        "pop_list": [
+            "images"
+        ]
+    },
+    "training_dataloader": {
+        "batch_size": 1,
+        "num_workers": 4,
+        "prefetch_factor": 1,
+        "persistent_workers": true
+    },
+    "validation_dataloader": {
+        "batch_size": 1,
+        "num_workers": 1,
+        "prefetch_factor": 3,
+        "persistent_workers": true
+    },
+    "preview_dataloader": {
+        "batch_size": 1,
+        "num_workers": 1,
+        "prefetch_factor": 1,
+        "shuffle": false,
+        "drop_last": true,
+        "persistent_workers": true
+    },
+    "output_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/train_nuplan_bev_condcross"
+}
