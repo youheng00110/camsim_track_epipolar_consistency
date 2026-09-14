@@ -1,0 +1,43 @@
+============================================================
+NuScenes ori6 -> front3 full SAM3 evaluation
+============================================================
+PREVIEW_ROOT     = /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_merged500
+PREVIEW_MANIFEST = /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_merged500/stflow_manifest_front3.jsonl
+BOX_ROOT         = /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_box/box_projection
+OUTPUT           = /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/sam3_nuscenes_ori6_front3_full
+
+===== Preview =====
+-rw-r--r-- 1 root root 13M Aug  8 17:13 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_merged500/stflow_manifest_front3.jsonl
+
+===== Video count =====
+300 /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_merged500/stflow_manifest_front3.jsonl
+
+===== Box manifests =====
+/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_box/box_projection/rank_00/box_manifest.jsonl
+/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_box/box_projection/rank_01/box_manifest.jsonl
+/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_box/box_projection/rank_02/box_manifest.jsonl
+/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori6_box/box_projection/rank_03/box_manifest.jsonl
+
+BOX_MANIFEST_COUNT=4
+
+===== FIRST VIDEO CHECK =====
+video_id: nuscenes_video_000000
+frames: 19
+views: 3
+cameras: ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT']
+[OK] front3 cameras correct
+
+============================================================
+Environment check
+============================================================
+/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/bin/python
+/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/bin/torchrun
+/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+[OK] sam3 import
+torch: 2.5.1+cu118
+cuda: True
+gpu count: 1
+Traceback (most recent call last):
+  File "<stdin>", line 11, in <module>
+RuntimeError: Need 4 GPUs, got 1

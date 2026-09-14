@@ -1,0 +1,1732 @@
+{
+    "device": "cuda",
+    "ddp_backend": "nccl",
+    "train_epochs": 20,
+    "generator_seed": 0,
+    "same_dataset_per_global_batch": true,
+    "data_shuffle": true,
+    "fix_training_data_order": true,
+    "global_state": {
+        "nuscenes_fs": {
+            "_class_name": "fsspec.implementations.dirfs.DirFileSystem",
+            "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nus_local",
+            "fs": {
+                "_class_name": "dwm.fs.dirfs.DirFileSystem"
+            }
+        },
+        "device_mesh": {
+            "_class_name": "torch.distributed.device_mesh.init_device_mesh",
+            "device_type": "cuda",
+            "mesh_shape": [
+                1,
+                8
+            ]
+        }
+    },
+    "optimizer": {
+        "_class_name": "torch.optim.AdamW",
+        "lr": 6e-05
+    },
+    "pipeline": {
+        "_class_name": "dwm.pipelines.lyh.bev_pv_epipolar.BEVPipeline",
+        "common_config": {
+            "distribution_framework": "fsdp",
+            "print_load_state_info": true,
+            "memory_efficient_batch": 12,
+            "fsdp_settings": {
+                "sharding_strategy": {
+                    "_class_name": "torch.distributed.fsdp.ShardingStrategy",
+                    "value": 4
+                },
+                "device_mesh": {
+                    "_class_name": "dwm.common.get_state",
+                    "key": "device_mesh"
+                },
+                "mixed_precision": {
+                    "_class_name": "torch.distributed.fsdp.MixedPrecision",
+                    "param_dtype": {
+                        "_class_name": "get_class",
+                        "class_name": "torch.float16"
+                    }
+                }
+            },
+            "uncondition_image_color": 0.1255
+        },
+        "training_config": {
+            "reference_frame_count": 3,
+            "generation_task_ratio": 0.2,
+            "image_generation_ratio": 0.5,
+            "all_reference_visible_ratio": 0.5,
+            "reference_visible_rate": 0.5,
+            "condition_dropout_ratio": 0.15,
+            "disable_reference_frame_loss": true,
+            "view_consistency_loss_weight": 0.1,
+            "view_consistency_loss_warmup_steps": 1000,
+            "view_consistency_time_divisor": 16,
+            "view_consistency_pairs_per_time": 2,
+            "view_consistency_enable_crossview": true,
+            "view_consistency_enable_crossframe": true,
+            "view_consistency_crossframe_stride": 1,
+            "view_consistency_max_sigma": 0.5,
+            "view_consistency_max_foreground_patches": 128,
+            "view_consistency_max_background_patches": 128,
+            "view_consistency_min_patches": 4,
+            "view_consistency_epipolar_band_width": 2.5,
+            "view_consistency_negative_band_scale": 1.0,
+            "view_consistency_margin": 0.1,
+            "view_consistency_temperature": 0.07,
+            "view_consistency_lower_half_start_ratio": 0.5,
+            "view_consistency_box_dilation_kernel": 31,
+            "view_consistency_depth_range_enabled": true,
+            "view_consistency_min_depth": 0.1,
+            "view_consistency_max_depth": 80.0,
+            "view_consistency_time_start": 10,
+            "view_consistency_time_end": 20
+        },
+        "inference_config": {
+            "scheduler": "dwm.schedulers.temporal_independent.FlowMatchEulerDiscreteScheduler",
+            "guidance_scale": 2.0,
+            "inference_steps": 38,
+            "preview_image_size": [
+                512,
+                288
+            ],
+            "generate_frames_for_reference": false,
+            "sequence_length_per_iteration": 19,
+            "reference_frame_count": 3,
+            "autoregressive_stride": 16,
+            "autoregression_data_exception_for_take_sequence": [
+                "crossview_mask",
+                "view_consistency_pair_mask"
+            ],
+            "evaluation_item_count": 480
+        },
+        "model": {
+            "_class_name": "dwm.models.lyh.bev_pv_plucker_epipolar.BEVConditionedSD3TransformerModel",
+            "attention_head_dim": 64,
+            "caption_projection_dim": 1536,
+            "in_channels": 16,
+            "joint_attention_dim": 4096,
+            "num_attention_heads": 24,
+            "num_layers": 24,
+            "out_channels": 16,
+            "patch_size": 2,
+            "pooled_projection_dim": 2048,
+            "pos_embed_max_size": 192,
+            "sample_size": 128,
+            "block_layers": [
+                1,
+                5,
+                9,
+                13,
+                17,
+                21
+            ],
+            "merge_factor": 2.0,
+            "bev_in_channels": 13,
+            "bev_hidden_channels": 256,
+            "trajectory_translation_scale": 10.0,
+            "bbox_config": {
+                "num_classes": 10,
+                "points_per_box": 8,
+                "num_freqs": 4,
+                "hidden_dim": 768,
+                "class_dim": 768,
+                "temporal_depth": 1,
+                "temporal_heads": 8,
+                "position_min": [
+                    -80.0,
+                    -80.0,
+                    -5.0
+                ],
+                "position_range": [
+                    160.0,
+                    160.0,
+                    10.0
+                ]
+            },
+            "condition_image_adapter_config": {
+                "in_channels": 9,
+                "channels": [
+                    1536,
+                    1536,
+                    1536,
+                    1536,
+                    1536,
+                    1536
+                ],
+                "is_downblocks": [
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false
+                ],
+                "num_res_blocks": 2,
+                "downscale_factor": 8,
+                "use_zero_convs": true
+            },
+            "view_consistency_config": {
+                "enabled": true,
+                "layer_id": 13,
+                "projector_dim": 128,
+                "projector_hidden_dim": 256,
+                "projector_layers": 2
+            }
+        },
+        "pretrained_model_name_or_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/lyhmigration/stable-diffusion-3-medium",
+        "model_checkpoint_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/ckpt/50000_map13_from_map3.pth",
+        "model_load_state_args": {
+            "strict": false
+        },
+        "metrics": {
+            "fid": {
+                "_class_name": "torchmetrics.image.fid.FrechetInceptionDistance",
+                "normalize": true
+            },
+            "fvd": {
+                "_class_name": "dwm.metrics.fvd.FrechetVideoDistance",
+                "inception_3d_checkpoint_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/lyhmigration/i3d_pretrained_400.pt",
+                "sequence_count": 19
+            }
+        }
+    },
+    "training_dataset": {
+        "_class_name": "dwm.datasets.common.DatasetAdapter",
+        "default_height": 288,
+        "default_width": 512,
+        "base_dataset": {
+            "_class_name": "torch.utils.data.ConcatDataset",
+            "datasets": [
+                {
+                    "_class_name": "dwm.datasets.lyh.bev_pv.AlignedBEVPVDataset",
+                    "bev_dataset": {
+                        "_class_name": "dwm.datasets.bevs.waymo.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_open_dataset_v_1_4_3"
+                        },
+                        "split": "training",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_open_dataset_v_1_4_3",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_balanced/balanced_windows_metadata.json",
+                        "info_dict_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_balanced/training.info.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "LIDAR_TOP",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT_RIGHT",
+                            "CAM_FRONT_RIGHT",
+                            "CAM_SIDE_LEFT",
+                            "CAM_FRONT",
+                            "CAM_FRONT",
+                            "CAM_SIDE_RIGHT"
+                        ],
+                        "hdmap_bev_settings": {
+                            "bev_size": [
+                                256,
+                                256
+                            ],
+                            "bev_from_ego_transform": [
+                                [
+                                    1.6,
+                                    0.0,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    -1.6,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    -1.6,
+                                    0.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    1.0
+                                ]
+                            ]
+                        },
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,0,0,1,0,0,0],[0,1,0,0,0,0,0,0],[1,0,0,0,1,1,0,0],[0,0,0,1,0,0,0,0],[1,0,1,0,0,1,0,0],[0,0,1,0,0,1,0,1],[0,0,0,0,0,0,1,0],[0,0,1,0,0,0,0,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 2,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,false,false,true,true,false,false],[false,false,false,false,false,false,false,false],[false,false,false,false,false,true,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,false,false,false,false],[true,false,true,false,false,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,false,false,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "max_boxes": 64
+                    },
+                    "pv_dataset": {
+                        "_class_name": "dwm.datasets.track_pv.waymo.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_open_dataset_v_1_4_3"
+                        },
+                        "split": "training",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_open_dataset_v_1_4_3",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_balanced/balanced_windows_metadata.json",
+                        "info_dict_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/waymo_balanced/training.info.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "LIDAR_TOP",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT_RIGHT",
+                            "CAM_FRONT_RIGHT",
+                            "CAM_SIDE_LEFT",
+                            "CAM_FRONT",
+                            "CAM_FRONT",
+                            "CAM_SIDE_RIGHT"
+                        ],
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": {},
+                        "image_description_settings": null,
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,0,0,1,0,0,0],[0,1,0,0,0,0,0,0],[1,0,0,0,1,1,0,0],[0,0,0,1,0,0,0,0],[1,0,1,0,0,1,0,0],[0,0,1,0,0,1,0,1],[0,0,0,0,0,0,1,0],[0,0,1,0,0,0,0,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 2,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,false,false,true,true,false,false],[false,false,false,false,false,false,false,false],[false,false,false,false,false,true,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,false,false,false,false],[true,false,true,false,false,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,false,false,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "instance_flow_image_settings": {
+                            "offset_scale": [
+                                5.0,
+                                5.0,
+                                2.0
+                            ],
+                            "encoding": "tanh",
+                            "near_plane": 0.1,
+                            "render_size": [
+                                288,
+                                512
+                            ]
+                        }
+                    },
+                    "verify_alignment": true
+                },
+                {
+                    "_class_name": "dwm.datasets.lyh.bev_pv.AlignedBEVPVDataset",
+                    "bev_dataset": {
+                        "_class_name": "dwm.datasets.bevs.nuscenes.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.common.get_state",
+                            "key": "nuscenes_fs"
+                        },
+                        "dataset_name": "interp_12Hz_trainval",
+                        "split": "train",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "LIDAR_TOP",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT",
+                            "CAM_FRONT",
+                            "CAM_FRONT_RIGHT",
+                            "CAM_BACK_RIGHT",
+                            "CAM_BACK",
+                            "CAM_BACK_LEFT"
+                        ],
+                        "hdmap_bev_settings": {
+                            "bev_size": [
+                                256,
+                                256
+                            ],
+                            "bev_from_ego_transform": [
+                                [
+                                    1.6,
+                                    0.0,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    -1.6,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    -1.6,
+                                    0.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    1.0
+                                ]
+                            ]
+                        },
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,0,0,0,0,1],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[1,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 1,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,false,false,false,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,true,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,true,false,false],[false,false,false,false,true,false,true,false],[false,false,false,false,false,true,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "max_boxes": 64
+                    },
+                    "pv_dataset": {
+                        "_class_name": "dwm.datasets.track_pv.nuscenes.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.common.get_state",
+                            "key": "nuscenes_fs"
+                        },
+                        "dataset_name": "interp_12Hz_trainval",
+                        "split": "train",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "LIDAR_TOP",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT_LEFT",
+                            "CAM_FRONT",
+                            "CAM_FRONT",
+                            "CAM_FRONT_RIGHT",
+                            "CAM_BACK_RIGHT",
+                            "CAM_BACK",
+                            "CAM_BACK_LEFT"
+                        ],
+                        "keyframe_only": true,
+                        "enable_synchronization_check": false,
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": {},
+                        "image_description_settings": null,
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,0,0,0,0,1],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[1,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 1,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,false,false,false,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,true,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,true,false,false],[false,false,false,false,true,false,true,false],[false,false,false,false,false,true,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "instance_flow_image_settings": {
+                            "offset_scale": [
+                                5.0,
+                                5.0,
+                                2.0
+                            ],
+                            "encoding": "tanh",
+                            "near_plane": 0.1,
+                            "render_size": [
+                                288,
+                                512
+                            ]
+                        }
+                    },
+                    "verify_alignment": true
+                },
+                {
+                    "_class_name": "dwm.datasets.lyh.bev_pv.AlignedBEVPVDataset",
+                    "bev_dataset": {
+                        "_class_name": "dwm.datasets.lyh.track_pv_bev_argoverse.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "fs": {
+                                "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                                "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2"
+                            },
+                            "enable_cached_info": true
+                        },
+                        "split": "train",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2",
+                        "index_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_json",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_balanced/balanced_windows.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "lidar",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_left",
+                            "cameras/ring_front_right",
+                            "cameras/ring_side_right",
+                            "cameras/ring_rear_right",
+                            "cameras/ring_rear_left",
+                            "cameras/ring_side_left"
+                        ],
+                        "hdmap_bev_settings": {
+                            "bev_size": [
+                                256,
+                                256
+                            ],
+                            "bev_from_ego_transform": [
+                                [
+                                    1.6,
+                                    0.0,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    -1.6,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    -1.6,
+                                    0.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    1.0
+                                ]
+                            ],
+                            "append_dynamic_object_mask": false,
+                            "num_object_classes": 10
+                        },
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,1,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,0,0,0,1],[1,0,0,1,1,0,0,0],[0,0,0,1,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[0,0,1,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 3,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,true,false,false,false,false],[false,false,false,false,false,false,false,false],[true,false,false,false,false,false,false,true],[true,false,false,false,true,false,false,false],[false,false,false,true,false,true,false,false],[false,false,false,false,true,false,true,false],[false,false,false,false,false,true,false,true],[false,false,true,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "enable_synchronization_check": true,
+                        "hide_lidar": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": null,
+                        "instance_flow_image_settings": null,
+                        "image_description_settings": null,
+                        "layout_token_settings": {
+                            "max_boxes": 64,
+                            "max_annotation_time_error_ns": 150000000,
+                            "bev_map_reference_channel": "lidar"
+                        }
+                    },
+                    "pv_dataset": {
+                        "_class_name": "dwm.datasets.track_pv.argoverse.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "fs": {
+                                "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                                "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2"
+                            },
+                            "enable_cached_info": true
+                        },
+                        "split": "train",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2",
+                        "index_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_json",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_balanced/balanced_windows.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "lidar",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_left",
+                            "cameras/ring_front_right",
+                            "cameras/ring_side_right",
+                            "cameras/ring_rear_right",
+                            "cameras/ring_rear_left",
+                            "cameras/ring_side_left"
+                        ],
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": {},
+                        "image_description_settings": null,
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,1,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,0,0,0,1],[1,0,0,1,1,0,0,0],[0,0,0,1,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[0,0,1,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 3,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,true,false,false,false,false],[false,false,false,false,false,false,false,false],[true,false,false,false,false,false,false,true],[true,false,false,false,true,false,false,false],[false,false,false,true,false,true,false,false],[false,false,false,false,true,false,true,false],[false,false,false,false,false,true,false,true],[false,false,true,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "instance_flow_image_settings": {
+                            "offset_scale": [
+                                5.0,
+                                5.0,
+                                2.0
+                            ],
+                            "encoding": "tanh",
+                            "near_plane": 0.1,
+                            "render_size": [
+                                288,
+                                512
+                            ]
+                        },
+                        "hide_lidar": true
+                    },
+                    "verify_alignment": true
+                },
+                {
+                    "_class_name": "dwm.datasets.lyh.bev_pv.AlignedBEVPVDataset",
+                    "bev_dataset": {
+                        "_class_name": "dwm.datasets.lyh.track_pv_bev_argoverse.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "fs": {
+                                "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                                "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2"
+                            },
+                            "enable_cached_info": true
+                        },
+                        "split": "train",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2",
+                        "index_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_json",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_balanced/balanced_windows.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "lidar",
+                            "cameras/ring_front_left",
+                            "cameras/ring_front_left",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_right",
+                            "cameras/ring_front_right",
+                            "cameras/ring_rear_right",
+                            "cameras/ring_rear_left"
+                        ],
+                        "hdmap_bev_settings": {
+                            "bev_size": [
+                                256,
+                                256
+                            ],
+                            "bev_from_ego_transform": [
+                                [
+                                    1.6,
+                                    0.0,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    -1.6,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    -1.6,
+                                    0.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    1.0
+                                ]
+                            ],
+                            "append_dynamic_object_mask": false,
+                            "num_object_classes": 10
+                        },
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,0,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,0,1,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,1,1],[0,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 3,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,false,false,false,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,true,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,false,true,false],[false,false,false,false,false,false,false,false],[false,false,false,false,true,false,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "enable_synchronization_check": true,
+                        "hide_lidar": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": null,
+                        "instance_flow_image_settings": null,
+                        "image_description_settings": null,
+                        "layout_token_settings": {
+                            "max_boxes": 64,
+                            "max_annotation_time_error_ns": 150000000,
+                            "bev_map_reference_channel": "lidar"
+                        }
+                    },
+                    "pv_dataset": {
+                        "_class_name": "dwm.datasets.track_pv.argoverse.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "fs": {
+                                "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                                "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2"
+                            },
+                            "enable_cached_info": true
+                        },
+                        "split": "train",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2",
+                        "index_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_json",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_balanced/balanced_windows.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "lidar",
+                            "cameras/ring_front_left",
+                            "cameras/ring_front_left",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_right",
+                            "cameras/ring_front_right",
+                            "cameras/ring_rear_right",
+                            "cameras/ring_rear_left"
+                        ],
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": {},
+                        "image_description_settings": null,
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,0,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,0,1,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,1,1],[0,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 3,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,false,false,false,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,true,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,false,true,false],[false,false,false,false,false,false,false,false],[false,false,false,false,true,false,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "instance_flow_image_settings": {
+                            "offset_scale": [
+                                5.0,
+                                5.0,
+                                2.0
+                            ],
+                            "encoding": "tanh",
+                            "near_plane": 0.1,
+                            "render_size": [
+                                288,
+                                512
+                            ]
+                        },
+                        "hide_lidar": true
+                    },
+                    "verify_alignment": true
+                },
+                {
+                    "_class_name": "dwm.datasets.lyh.bev_pv.AlignedBEVPVDataset",
+                    "bev_dataset": {
+                        "_class_name": "dwm.datasets.lyh.track_pv_bev_argoverse.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "fs": {
+                                "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                                "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2"
+                            },
+                            "enable_cached_info": true
+                        },
+                        "split": "train",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2",
+                        "index_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_json",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_balanced/balanced_windows.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "lidar",
+                            "cameras/ring_side_left",
+                            "cameras/ring_side_left",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_center",
+                            "cameras/ring_side_right",
+                            "cameras/ring_side_right",
+                            "cameras/ring_rear_right",
+                            "cameras/ring_rear_left"
+                        ],
+                        "hdmap_bev_settings": {
+                            "bev_size": [
+                                256,
+                                256
+                            ],
+                            "bev_from_ego_transform": [
+                                [
+                                    1.6,
+                                    0.0,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    -1.6,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    -1.6,
+                                    0.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    1.0
+                                ]
+                            ],
+                            "append_dynamic_object_mask": false,
+                            "num_object_classes": 10
+                        },
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,0,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,0,1,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,1,1],[0,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 3,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,false,false,false,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,true,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,false,true,false],[false,false,false,false,false,false,false,false],[false,false,false,false,true,false,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "enable_synchronization_check": true,
+                        "hide_lidar": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": null,
+                        "instance_flow_image_settings": null,
+                        "image_description_settings": null,
+                        "layout_token_settings": {
+                            "max_boxes": 64,
+                            "max_annotation_time_error_ns": 150000000,
+                            "bev_map_reference_channel": "lidar"
+                        }
+                    },
+                    "pv_dataset": {
+                        "_class_name": "dwm.datasets.track_pv.argoverse.MotionDataset",
+                        "fs": {
+                            "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                            "fs": {
+                                "_class_name": "dwm.fs.dirfs.DirFileSystem",
+                                "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2"
+                            },
+                            "enable_cached_info": true
+                        },
+                        "split": "train",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/argoverse2",
+                        "index_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_json",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/avrgo2_balanced/balanced_windows.json",
+                        "sequence_length": 20,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                2.5,
+                                0.95
+                            ],
+                            [
+                                2,
+                                3,
+                                0.39
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "lidar",
+                            "cameras/ring_side_left",
+                            "cameras/ring_side_left",
+                            "cameras/ring_front_center",
+                            "cameras/ring_front_center",
+                            "cameras/ring_side_right",
+                            "cameras/ring_side_right",
+                            "cameras/ring_rear_right",
+                            "cameras/ring_rear_left"
+                        ],
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": {},
+                        "image_description_settings": null,
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,0,1,0,0,0,0,0],[0,1,0,0,0,0,0,0],[1,0,1,0,1,0,0,0],[0,0,0,1,0,0,0,0],[0,0,1,0,1,0,1,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,1,1],[0,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 3,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,false,true,false,false,false,false,true],[false,false,false,false,false,false,false,false],[true,false,false,false,true,false,false,false],[false,false,false,false,false,false,false,false],[false,false,true,false,false,false,true,false],[false,false,false,false,false,false,false,false],[false,false,false,false,true,false,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "instance_flow_image_settings": {
+                            "offset_scale": [
+                                5.0,
+                                5.0,
+                                2.0
+                            ],
+                            "encoding": "tanh",
+                            "near_plane": 0.1,
+                            "render_size": [
+                                288,
+                                512
+                            ]
+                        },
+                        "hide_lidar": true
+                    },
+                    "verify_alignment": true
+                }
+            ]
+        },
+        "transform_list": [
+            {
+                "old_key": "images",
+                "new_key": "vae_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "hdmap_bev_images",
+                "new_key": "hdmap_bev_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "3dbox_images",
+                "new_key": "3dbox_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "hdmap_images",
+                "new_key": "hdmap_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "instance_flow_images",
+                "new_key": "instance_flow_images",
+                "transform": {
+                    "_class_name": "dwm.datasets.track_pv.pv_flow.ResizeInstanceFlow",
+                    "size": [
+                        288,
+                        512
+                    ]
+                }
+            }
+        ],
+        "pop_list": [
+            "images"
+        ],
+        "append_bbox_dynamic_bev_mask": true,
+        "bbox_dynamic_bev_num_classes": 10,
+        "bbox_dynamic_bev_map_key": "hdmap_bev_images",
+        "bbox_dynamic_bev_bbox_key": "bbox_token_corners",
+        "bbox_dynamic_bev_class_key": "bbox_token_classes",
+        "bbox_dynamic_bev_mask_key": "bbox_token_masks",
+        "bbox_dynamic_bev_x_min": -80.0,
+        "bbox_dynamic_bev_x_max": 80.0,
+        "bbox_dynamic_bev_y_min": -80.0,
+        "bbox_dynamic_bev_y_max": 80.0
+    },
+    "validation_dataset": {
+        "_class_name": "dwm.datasets.common.DatasetAdapter",
+        "default_height": 288,
+        "default_width": 512,
+        "base_dataset": {
+            "_class_name": "torch.utils.data.ConcatDataset",
+            "datasets": [
+                {
+                    "_class_name": "dwm.datasets.lyh.bev_pv.AlignedBEVPVDataset",
+                    "bev_dataset": {
+                        "_class_name": "dwm.datasets.bevs.nuplan.MotionDataset",
+                        "sensor_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuplan_prepo/mini_sensors",
+                        "pkl_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuplan_prepo/mini_infos_val.pkl",
+                        "cache_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/cache",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuPlan/plan_data/mini",
+                        "map_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuPlan/maps",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuplan_balanced/val_nonidle_windows_metadata.json",
+                        "sequence_length": 19,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                1.2,
+                                0.1
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "CAM_L2",
+                            "CAM_L1",
+                            "CAM_L0",
+                            "CAM_F0",
+                            "CAM_R0",
+                            "CAM_R1",
+                            "CAM_R2",
+                            "CAM_B0"
+                        ],
+                        "hdmap_bev_settings": {
+                            "bev_size": [
+                                256,
+                                256
+                            ],
+                            "bev_from_ego_transform": [
+                                [
+                                    1.6,
+                                    0.0,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    -1.6,
+                                    0.0,
+                                    128.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    -1.6,
+                                    0.0
+                                ],
+                                [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    1.0
+                                ]
+                            ]
+                        },
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,1,0,0,0,0,0,1],[1,1,1,0,0,0,0,0],[0,1,1,1,0,0,0,0],[0,0,1,1,1,0,0,0],[0,0,0,1,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[1,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 0,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,true,false,false,false,false,false,true],[true,false,true,false,false,false,false,false],[false,true,false,true,false,false,false,false],[false,false,true,false,true,false,false,false],[false,false,false,true,false,true,false,false],[false,false,false,false,true,false,true,false],[false,false,false,false,false,true,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "max_boxes": 64
+                    },
+                    "pv_dataset": {
+                        "_class_name": "dwm.datasets.track_pv.nuplan.MotionDataset",
+                        "sensor_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuplan_prepo/mini_sensors",
+                        "pkl_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuplan_prepo/mini_infos_val.pkl",
+                        "balanced_json_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuplan_balanced/val_nonidle_windows_metadata.json",
+                        "cache_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/cache",
+                        "dataset_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuPlan/plan_data/mini",
+                        "map_root": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuPlan/maps",
+                        "sequence_length": 19,
+                        "fps_stride_tuples": [
+                            [
+                                6,
+                                1.2,
+                                0.1
+                            ]
+                        ],
+                        "sensor_channels": [
+                            "CAM_L2",
+                            "CAM_L1",
+                            "CAM_L0",
+                            "CAM_F0",
+                            "CAM_R0",
+                            "CAM_R1",
+                            "CAM_R2",
+                            "CAM_B0"
+                        ],
+                        "enable_camera_transforms": true,
+                        "enable_ego_transforms": true,
+                        "enable_synchronization_check": true,
+                        "_3dbox_image_settings": {},
+                        "hdmap_image_settings": {},
+                        "image_description_settings": {
+                            "path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/dataset/nuplan_prepo/nuplan_scene.json",
+                            "align_keys": [
+                                "time",
+                                "weather"
+                            ],
+                            "reorder_keys": true,
+                            "drop_rates": {
+                                "environment": 0.04,
+                                "objects": 0.08,
+                                "image_description": 0.16
+                            }
+                        },
+                        "stub_key_data_dict": {
+                            "crossview_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[1,1,0,0,0,0,0,1],[1,1,1,0,0,0,0,0],[0,1,1,1,0,0,0,0],[0,0,1,1,1,0,0,0],[0,0,0,1,1,1,0,0],[0,0,0,0,1,1,1,0],[0,0,0,0,0,1,1,1],[1,0,0,0,0,0,1,1]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ],
+                            "dataset_tag": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": 0,
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.int64"
+                                    }
+                                }
+                            ],
+                            "view_consistency_pair_mask": [
+                                "content",
+                                {
+                                    "_class_name": "torch.tensor",
+                                    "data": {
+                                        "_class_name": "json.loads",
+                                        "s": "[[false,true,false,false,false,false,false,true],[true,false,true,false,false,false,false,false],[false,true,false,true,false,false,false,false],[false,false,true,false,true,false,false,false],[false,false,false,true,false,true,false,false],[false,false,false,false,true,false,true,false],[false,false,false,false,false,true,false,true],[true,false,false,false,false,false,true,false]]"
+                                    },
+                                    "dtype": {
+                                        "_class_name": "get_class",
+                                        "class_name": "torch.bool"
+                                    }
+                                }
+                            ]
+                        },
+                        "instance_flow_image_settings": {
+                            "offset_scale": [
+                                5.0,
+                                5.0,
+                                2.0
+                            ],
+                            "encoding": "tanh",
+                            "near_plane": 0.1,
+                            "render_size": [
+                                288,
+                                512
+                            ]
+                        }
+                    },
+                    "verify_alignment": true
+                }
+            ]
+        },
+        "transform_list": [
+            {
+                "old_key": "images",
+                "new_key": "vae_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "3dbox_images",
+                "new_key": "3dbox_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "hdmap_bev_images",
+                "new_key": "hdmap_bev_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "hdmap_images",
+                "new_key": "hdmap_images",
+                "transform": {
+                    "_class_name": "torchvision.transforms.Compose",
+                    "transforms": [
+                        {
+                            "_class_name": "torchvision.transforms.Resize",
+                            "size": [
+                                288,
+                                512
+                            ]
+                        },
+                        {
+                            "_class_name": "torchvision.transforms.ToTensor"
+                        }
+                    ]
+                }
+            },
+            {
+                "old_key": "instance_flow_images",
+                "new_key": "instance_flow_images",
+                "transform": {
+                    "_class_name": "dwm.datasets.track_pv.pv_flow.ResizeInstanceFlow",
+                    "size": [
+                        288,
+                        512
+                    ]
+                }
+            }
+        ],
+        "pop_list": [
+            "images"
+        ],
+        "append_bbox_dynamic_bev_mask": true,
+        "bbox_dynamic_bev_num_classes": 10,
+        "bbox_dynamic_bev_map_key": "hdmap_bev_images",
+        "bbox_dynamic_bev_bbox_key": "bbox_token_corners",
+        "bbox_dynamic_bev_class_key": "bbox_token_classes",
+        "bbox_dynamic_bev_mask_key": "bbox_token_masks",
+        "bbox_dynamic_bev_x_min": -80.0,
+        "bbox_dynamic_bev_x_max": 80.0,
+        "bbox_dynamic_bev_y_min": -80.0,
+        "bbox_dynamic_bev_y_max": 80.0
+    },
+    "training_dataloader": {
+        "batch_size": 1,
+        "num_workers": 4,
+        "prefetch_factor": 1,
+        "persistent_workers": true
+    },
+    "validation_dataloader": {
+        "batch_size": 1,
+        "num_workers": 1,
+        "prefetch_factor": 3,
+        "persistent_workers": true
+    },
+    "preview_dataloader": {
+        "batch_size": 1,
+        "num_workers": 1,
+        "prefetch_factor": 1,
+        "shuffle": false,
+        "drop_last": true,
+        "persistent_workers": true
+    },
+    "output_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/output/train_bev_pv_plucker_epipolar"
+}

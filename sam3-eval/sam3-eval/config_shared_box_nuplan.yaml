@@ -1,0 +1,88 @@
+paths:
+  preview_root: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuplanhard1000
+  shared_box_root: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuplanhard1000/petr_preview_paired_200/box_projection
+  sam3_repo: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/sam3
+  checkpoint: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/ckpt/sam3.1/sam3.1_multiplex.pt
+  output_dir: /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/output_nuplanhard1000_shared_box
+preview:
+  manifest_glob: '**/*_merged1000/stflow_manifest.jsonl'
+  skip_reference_frames: true
+  strict_paths: true
+  include_methods: []
+  exclude_methods: []
+shared_box:
+  manifest_glob: '**/box_manifest.jsonl'
+  strict_paths: true
+  strict_match: true
+sources:
+  generated:
+    type: preview_generated
+    group_by_manifest: true
+model:
+  version: sam3.1
+  prompts:
+  - car
+  - truck
+  - bus
+  confidence_threshold: 0.25
+  batch_size: 1
+  loader_workers: 4
+  precision: bfloat16
+  input_resolution: 1008
+  save_masks: true
+  mask_resolution: 256
+  mask_threshold: 0.5
+  max_detections_per_prompt: 100
+  max_detections_per_image: 150
+  nms_iou_threshold: 0.7
+  checkpoint_minimum_coverage: 0.95
+  checkpoint_mmap: true
+box_projection:
+  vehicle_colors_rgb:
+  - - 0
+    - 0
+    - 255
+  color_tolerance: 100
+  min_brightness: 20
+  close_kernel: 1
+  min_line_pixels: 16
+  min_bbox_width: 5
+  min_bbox_height: 5
+  min_hull_area: 36
+annotation:
+  classes:
+  - CAR
+  - TRUCK
+  - BUS
+  near_plane: 0.1
+  min_projected_height_px: 8.0
+  min_projected_area_px: 64.0
+  min_in_frame_fraction: 0.1
+visibility:
+  disable_gt_occlusion: true
+  min_gt_visible_ratio: 0.0
+  min_gt_visible_connected_pixels: 4
+matching:
+  min_mask_iou: 0.05
+  max_center_error_norm: 0.8
+  max_scale_error_log: 1.2
+  max_cost: 1.1
+  cost_mask_iou: 0.65
+  cost_center: 0.2
+  cost_bottom: 0.05
+  cost_scale: 0.1
+  allow_bbox_mask_fallback: false
+  min_sam_connected_pixels: 0
+visualization:
+  enabled: true
+  max_frames_per_source: 16
+  image_quality: 92
+  mask_alpha: 0.25
+  draw_cuboid: false
+  draw_detection_box: true
+  draw_filtered_small_sam: true
+runtime:
+  seed: 3407
+  backend: sam3.1
+  limit_frames: 0
+  overwrite: true

@@ -169,7 +169,10 @@
                 "angle",
                 "dist"
             ],
-            "evaluation_item_count": 480
+            "evaluation_item_count": 480,
+
+
+        
         },
         "model": {
             "_class_name": "dwm.models.crossview_temporal_dit_PLUCKER_track.DiTCrossviewTemporalConditionModel",

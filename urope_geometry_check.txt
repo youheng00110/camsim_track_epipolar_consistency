@@ -1,0 +1,2109 @@
+OpenDWM URoPE geometry/code check
+ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM
+DATE=Sat Sep  5 23:24:55 CST 2026
+
+================================================================
+1. ImageAdapter
+================================================================
+class ImageAdapter(torch.nn.Module):
+    def __init__(
+        self, in_channels: int = 3,
+        channels: list = [320, 320, 640, 1280, 1280],
+        is_downblocks: list = [False, True, True, True, False],
+        num_res_blocks: int = 2, downscale_factor: int = 8,
+        use_zero_convs: bool = False, zero_gate_coef: Optional[float] = None,
+        gradient_checkpointing: bool = True
+    ):
+        super().__init__()
+
+        in_channels = in_channels * downscale_factor ** 2
+        self.unshuffle = torch.nn.PixelUnshuffle(downscale_factor)
+        self.body = torch.nn.ModuleList([
+            diffusers.models.adapter.AdapterBlock(
+                in_channels if i == 0 else channels[i - 1], channels[i],
+                num_res_blocks, down=is_downblocks[i])
+            for i in range(len(channels))
+        ])
+        self.gradient_checkpointing = gradient_checkpointing
+
+        self.zero_convs = torch.nn.ModuleList([
+            torch.nn.Conv2d(channel, channel, 1)
+            for channel in channels
+        ]) if use_zero_convs else [None for _ in channels]
+        for i in self.zero_convs:
+            if i is not None:
+                torch.nn.init.zeros_(i.weight)
+                torch.nn.init.zeros_(i.bias)
+
+        self.zero_gate_coef = zero_gate_coef
+        self.zero_gates = torch.nn.Parameter(torch.zeros(len(channels))) \
+            if zero_gate_coef else None
+
+    def forward(self, x: torch.Tensor, return_features: bool = False):
+        base_shape = x.shape[:-3]
+        x = self.unshuffle(x.flatten(0, -4))
+        features = []
+        for i, (block, zero_conv) in enumerate(zip(self.body, self.zero_convs)):
+            if self.training and self.gradient_checkpointing:
+                x = torch.utils.checkpoint.checkpoint(
+                    block, x, use_reentrant=False)
+            else:
+                x = block(x)
+
+            x_out = x
+            if zero_conv is not None:
+                x_out = zero_conv(x_out)
+
+            if self.zero_gates is not None:
+                x_out = x_out * torch.tanh(
+                    self.zero_gate_coef * self.zero_gates[i])
+
+            features.append(x_out.view(*base_shape, *x_out.shape[1:]))
+        return features if not return_features else features[-1]
+
+def zero_module(module: torch.nn.Module):
+    for parameter in module.parameters():
+        parameter.detach().zero_()
+    return module
+def get_temporal_kernel_size(temporal_downsample_factor: int) -> int:
+    if temporal_downsample_factor % 2 == 0:
+        return temporal_downsample_factor + 1
+    return temporal_downsample_factor
+class TemporalConditionImageAdapter(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        depth: int,
+        hidden_channels: Optional[int] = None,
+        temporal_downsample_factor: int = 4,
+    ):
+        super().__init__()
+        self.out_channels = int(out_channels)
+        self.depth = int(depth)
+        self.hidden_channels = int(hidden_channels or out_channels)
+        self.temporal_downsample_factor = int(temporal_downsample_factor)
+
+        kernel_t = get_temporal_kernel_size(self.temporal_downsample_factor)
+
+        self.stem = torch.nn.Sequential(
+            torch.nn.Conv3d(
+                in_channels=int(in_channels),
+                out_channels=self.hidden_channels,
+                kernel_size=(1, 3, 3),
+                stride=(1, 1, 1),
+                padding=(0, 1, 1),
+            ),
+            torch.nn.SiLU(),
+            torch.nn.Conv3d(
+                in_channels=self.hidden_channels,
+                out_channels=self.hidden_channels,
+                kernel_size=(1, 3, 3),
+                stride=(1, 1, 1),
+                padding=(0, 1, 1),
+            ),
+            torch.nn.SiLU(),
+        )
+
+        self.temporal = torch.nn.Sequential(
+            torch.nn.Conv3d(
+                in_channels=self.hidden_channels,
+                out_channels=self.hidden_channels,
+                kernel_size=(kernel_t, 1, 1),
+                stride=(self.temporal_downsample_factor, 1, 1),
+                padding=(kernel_t // 2, 0, 0),
+            ),
+            torch.nn.SiLU(),
+        )
+
+        self.projs = torch.nn.ModuleList(
+            [
+                zero_module(
+                    torch.nn.Conv3d(
+                        in_channels=self.hidden_channels,
+                        out_channels=self.out_channels,
+                        kernel_size=(1, 1, 1),
+                        stride=(1, 1, 1),
+                        padding=(0, 0, 0),
+                    )
+                )
+                for _ in range(self.depth)
+            ]
+        )
+    def forward(
+        self,
+        condition_image_tensor: torch.Tensor,
+        target_sequence_length: int,
+        target_patch_size,
+    ):
+        if condition_image_tensor.ndim != 5:
+            raise ValueError(
+                f"condition_image_tensor must be 5D [(B*V), C, T, H, W], "
+                f"but got shape {tuple(condition_image_tensor.shape)}"
+            )
+
+        if len(target_patch_size) != 2:
+            raise ValueError(
+                f"target_patch_size must be (patch_height, patch_width), "
+                f"but got {target_patch_size}"
+            )
+
+        batch_size_total, _, dense_t, _, _ = condition_image_tensor.shape
+        patch_height, patch_width = target_patch_size
+
+        x = torch.nn.functional.adaptive_avg_pool3d(
+            condition_image_tensor,
+            output_size=(dense_t, patch_height, patch_width),
+        )
+
+        x = self.stem(x)
+        x = self.temporal(x)
+
+        if x.shape[2] != target_sequence_length:
+            raise ValueError(
+                f"TemporalConditionImageAdapter got T={x.shape[2]}, "
+                f"expected {target_sequence_length}. "
+                f"dense_t={dense_t}, temporal_downsample_factor={self.temporal_downsample_factor}"
+            )
+
+        outputs = []
+        for proj in self.projs:
+            y = proj(x)
+            y = einops.rearrange(
+                y,
+                "b c t h w -> b (t h w) c",
+                t=target_sequence_length,
+                h=patch_height,
+                w=patch_width,
+            )
+            outputs.append(y)
+
+        return outputs
+================================================================
+2. VTSelfAttentionBlock
+================================================================
+class VTSelfAttentionBlock(torch.nn.Module):
+    def __init__(
+        self, dim: int, time_mix_inner_dim: int, 
+        num_attention_heads: int, attention_head_dim: int, 
+        qk_norm=None
+    ):
+        super().__init__()
+        self.is_res = dim == time_mix_inner_dim
+
+        self.norm_in = torch.nn.LayerNorm(dim)
+
+        # 1. Self-Attn
+        self.ff_in = diffusers.models.attention.FeedForward(
+            dim, dim_out=time_mix_inner_dim, activation_fn="geglu")
+
+        self.norm1 = torch.nn.LayerNorm(time_mix_inner_dim)
+        self.attn1 = diffusers.models.attention_processor.Attention(
+            query_dim=time_mix_inner_dim, heads=num_attention_heads,
+            dim_head=attention_head_dim, cross_attention_dim=None,
+            qk_norm=qk_norm)
+
+        # 2. Feed-forward
+        self.norm3 = torch.nn.LayerNorm(time_mix_inner_dim)
+        self.ff = diffusers.models.attention.FeedForward(
+            time_mix_inner_dim, activation_fn="geglu")
+
+    def forward(
+        self, hidden_states: torch.Tensor,
+        self_attention_mask: torch.Tensor = None
+    ):
+        residual = hidden_states
+        hidden_states = self.norm_in(hidden_states)
+        hidden_states = self.ff_in(hidden_states)
+        hidden_states = hidden_states + residual
+
+        norm_hidden_states = self.norm1(hidden_states)
+        attn_output = self.attn1(
+            norm_hidden_states, encoder_hidden_states=None,
+            attention_mask=self_attention_mask)
+        hidden_states = attn_output + hidden_states
+
+        # Feed-forward
+        norm_hidden_states = self.norm3(hidden_states)
+        ff_output = self.ff(norm_hidden_states)
+        hidden_states = ff_output + hidden_states
+
+        return hidden_states
+
+================================================================
+3. AlphaBlender
+================================================================
+class AlphaBlender(torch.nn.Module):
+
+    strategies = ["fixed", "learned", "learned_with_images"]
+
+    def __init__(
+        self, alpha: float, merge_strategy: str = "learned_with_images"
+    ):
+        super().__init__()
+        self.merge_strategy = merge_strategy
+
+        if merge_strategy not in AlphaBlender.strategies:
+            raise ValueError(
+                "merge_strategy needs to be in {}"
+                .format(AlphaBlender.strategies))
+
+        if self.merge_strategy == "fixed":
+            self.register_buffer("mix_factor", torch.Tensor([alpha]))
+        elif "learned" in self.merge_strategy:
+            self.register_parameter(
+                "mix_factor", torch.nn.Parameter(torch.Tensor([alpha])))
+        else:
+            raise ValueError(
+                "Unknown merge strategy {}".format(self.merge_strategy))
+
+    def get_alpha(self, image_only_indicator=None):
+        if self.merge_strategy == "fixed":
+            alpha = self.mix_factor
+        elif self.merge_strategy == "learned":
+            alpha = torch.sigmoid(self.mix_factor)
+        elif self.merge_strategy == "learned_with_images":
+            if image_only_indicator is None:
+                raise ValueError(
+                    "Please provide image_only_indicator to use "
+                    "learned_with_images merge strategy")
+
+            alpha = torch.where(
+                image_only_indicator,
+                torch.ones((1,), device=image_only_indicator.device),
+                torch.sigmoid(self.mix_factor))
+        else:
+            raise NotImplementedError
+
+        return alpha
+
+    def forward(
+        self, a: torch.Tensor, b: torch.Tensor, image_only_indicator=None
+    ):
+        """Returns alpha * a + (1 - alpha) * b. For the True item in the
+        image_only_indicator, the alpha is 1.
+
+        Args:
+            a (`torch.Tensor`): The first input tensor.
+            b (`torch.Tensor`): The second input tensor,
+            image_only_indicator
+                (`torch.BoolTensor`, *optional*, default to None):
+                The flags in the shape of `(batch_size,)` to switch the alpha
+                to 1 if the item is True.
+        """
+
+        alpha = self.get_alpha(image_only_indicator).to(a.dtype)
+        expected_alpha_shape = list(alpha.shape) + \
+            [1 for _ in range(len(a.shape) - len(alpha.shape))]
+        alpha = alpha.view(*expected_alpha_shape)
+        return alpha * a + (1.0 - alpha) * b
+
+
+class ResBlock(torch.nn.Module):
+    """A crossview temporal Resnet block.
+
+    Args:
+        in_channels (`int`): The number of channels in the input.
+        out_channels (`int`, *optional*, default to be `None`):
+            The number of output channels for the first conv2d layer. If None,
+            same as `in_channels`.
+        temb_channels (`int`, *optional*, default to `512`): the number of
+            channels in timestep embedding.
+        eps (`float`, *optional*, defaults to `1e-5`): The epsilon to use for
+            the spatial resenet.
+        enable_temporal (`bool`, default to `True`): The flag to define
+            temporal resnet blocks.
+        temporal_eps (`float`, *optional*, defaults to `eps`): The epsilon to
+            use for the temporal resnet.
+        merge_factor (`float`, *optional*, defaults to `0.5`): The merge factor
+            to use for the temporal mixing.
+        merge_strategy (`str`, *optional*, defaults to `learned_with_images`):
+            The merge strategy to use for the temporal mixing.
+    """
+
+    def __init__(
+        self, in_channels: int, out_channels=None, temb_channels: int = 512,
+        eps: float = 1e-5, enable_temporal: bool = True, temporal_eps=None,
+        merge_factor: float = 0.5, merge_strategy: str = "learned_with_images"
+    ):
+        super().__init__()
+
+        self.spatial_res_block = diffusers.models.resnet.ResnetBlock2D(
+            in_channels=in_channels, out_channels=out_channels,
+            temb_channels=temb_channels, eps=eps)
+
+        if enable_temporal:
+            self.temporal_res_block = diffusers.models.resnet\
+                .TemporalResnetBlock(
+                    out_channels if out_channels is not None else in_channels,
+                    out_channels if out_channels is not None else in_channels,
+                    temb_channels=temb_channels,
+                    eps=temporal_eps if temporal_eps is not None else eps)
+            self.time_mixer = AlphaBlender(
+                merge_factor, merge_strategy=merge_strategy)
+        else:
+            self.temporal_res_block = None
+
+    def forward(
+        self, hidden_states: torch.Tensor, temb=None, disable_temporal=None
+    ):
+        """The forward method.
+
+        Args:
+            hidden_states (`torch.Tensor`): The tensor with the following shape
+                `(batch_size, sequence_length, view_count, channel, height,
+                width)`.
+            temb (`torch.Tensor`, *optional*, default to None): The tensor with
+                the following shape `(batch_size, sequence_length, view_count,
+                channel)`.
+            disable_temporal (`torch.BoolTensor`, *optional*, default to None):
+                The flags in the shape of `(batch_size, )` to disable the
+                temporal attension result if the item is True.
+
+        Returns:
+            A `tuple` is returned where the first element is the sample tensor.
+        """
+
+        batch_size = hidden_states.shape[0]
+
+        # spatio part
+        hidden_states = self\
+            .spatial_res_block(
+                hidden_states.flatten(0, 2),
+                temb.flatten(0, 2) if temb is not None else temb)\
+            .unflatten(0, tuple(hidden_states.shape[:3]))
+
+        # temporal part
+        if self.temporal_res_block is not None:
+            # hidden state: [B, T, V, C, H, W] <-> [B * V, C, T, H, W]
+            # temb: [B, T, V, C] -> [B * V, T, C]
+            temporal_hidden_states = self\
+                .temporal_res_block(
+                    hidden_states.permute(0, 2, 3, 1, 4, 5).flatten(0, 1),
+                    temb.transpose(1, 2).flatten(0, 1) if temb is not None
+                    else temb)\
+                .unflatten(0, (batch_size, -1)).permute(0, 3, 1, 2, 4, 5)
+
+
+================================================================
+4. Waymo camera_transforms / ego_transforms
+================================================================
+1112-                        "image_height": int(calibration.height),
+1113-                        "image_width": int(calibration.width),
+1114-                    }
+1115-                )
+1116-            camera_specs.append(specs)
+1117-
+1118-        return render_instance_flow_images(
+1119-            frame_records,
+1120-            camera_specs,
+1121-            self.instance_flow_image_settings,
+1122-        )
+1123-
+1124-    ###增加筛选平衡后的json########
+1125-    def __init__(
+1126-        self,
+1127-        fs,
+1128-        info_dict_path,
+1129-        sequence_length,
+1130-        fps_stride_tuples,
+1131-        sensor_channels=["CAM_FRONT"],
+1132:        enable_camera_transforms=False,
+1133:        enable_ego_transforms=False,
+1134-        _3dbox_image_settings=None,
+1135-        hdmap_image_settings=None,
+1136-        _3dbox_bev_settings=None,
+1137-        hdmap_bev_settings=None,
+1138-        image_description_settings=None,
+1139-        stub_key_data_dict=None,
+1140-        balanced_json_path=None,
+1141-        dataset_root=None,
+1142-        layout_token_settings: dict = None,
+1143-        instance_flow_image_settings=None,
+1144-        split: str = "train" 
+1145-    ):
+1146-
+1147-        self.fs = fs
+1148-        self.sequence_length = sequence_length
+1149-        self.fps_stride_tuples = fps_stride_tuples
+1150-        self.sensor_channels = sensor_channels
+1151-        self.dataset_root = dataset_root
+1152:        self.enable_camera_transforms = enable_camera_transforms
+1153:        self.enable_ego_transforms = enable_ego_transforms
+1154-        self._3dbox_image_settings = _3dbox_image_settings
+1155-        self.hdmap_image_settings = hdmap_image_settings
+1156-        self._3dbox_bev_settings = _3dbox_bev_settings
+1157-        self.hdmap_bev_settings = hdmap_bev_settings
+1158-        self.image_description_settings = image_description_settings
+1159-        self.stub_key_data_dict = stub_key_data_dict
+1160-        self.split =split
+1161-        self.layout_token_settings = layout_token_settings
+1162-        self.instance_flow_image_settings = instance_flow_image_settings
+1163-        self.items = []
+1164-
+1165-        # ===============================
+1166-        # 1️⃣ 读取 info_dict
+1167-        # ===============================
+1168-
+1169-        with open(info_dict_path, "r") as f:
+1170-            raw_sample_info_dict = json.load(f)
+1171-
+1172-        self.sample_info_dict = {
+1173-            scene_id: sorted(sample_list, key=lambda x: x[0])
+1174-            for scene_id, sample_list in raw_sample_info_dict.items()
+1175-        }
+1176-
+1177-        self.sample_info_lookup = dwm.common.SerializedReadonlyDict({
+1178-            f"{scene_id};{sample_info[0]}": sample_info
+1179-            for scene_id, sample_list in self.sample_info_dict.items()
+1180-            for sample_info in sample_list
+1181-        })
+1182-
+1183-        # ===============================
+1184-        # 2️⃣ balanced_json（可选）
+1185-        # ===============================
+1186-
+1187-        use_balance = balanced_json_path is not None
+1188-
+--
+1519-                        MotionDataset.find_by_name(
+1520-                            i.context.camera_calibrations,
+1521-                            MotionDataset.sensor_name_id_dict[j]
+1522-                        )
+1523-                        for j in self.sensor_channels
+1524-                        if j.startswith("CAM")
+1525-                    ]
+1526-                    for i in frames
+1527-                ]
+1528-
+1529-                # extrinsic_correction 的逆，用于和原版保持一致的相机坐标定义
+1530-                ec_inv = torch.linalg.inv(
+1531-                    torch.tensor(
+1532-                        MotionDataset.extrinsic_correction,
+1533-                        dtype=torch.float32
+1534-                    )
+1535-                )
+1536-
+1537-                # camera_transforms: [T, V, 4, 4]
+1538-                # 将数据集原始外参与 correction 结合，得到统一约定下的相机变换
+1539:                result["camera_transforms"] = torch.stack([
+1540-                    torch.stack([
+1541-                        torch.tensor(
+1542-                            j.extrinsic.transform,
+1543-                            dtype=torch.float32
+1544-                        ).reshape(4, 4) @ ec_inv
+1545-                        for j in i
+1546-                    ])
+1547-                    for i in camera_calibrations
+1548-                ])
+1549-
+1550-                # camera_intrinsics: [T, V, 3, 3]
+1551-                # 这里用仓库原有的 make_intrinsic_matrix("pt") 形式覆盖前面手动拼的 K
+1552-                result["camera_intrinsics"] = torch.stack([
+1553-                    torch.stack([
+1554-                        dwm.datasets.common.make_intrinsic_matrix(
+1555-                            j.intrinsic[0:2],
+1556-                            j.intrinsic[2:4],
+1557-                            "pt"
+1558-                        )
+1559-                        for j in i
+1560-                    ])
+1561-                    for i in camera_calibrations
+1562-                ])
+1563-
+1564-                # image_size: [T, V, 2]
+1565-                # 这里约定为 [width, height]
+1566-                result["image_size"] = torch.stack([
+1567-                    torch.stack([
+1568-                        torch.tensor([j.width, j.height], dtype=torch.long)
+1569-                        for j in i
+1570-                    ])
+1571-                    for i in camera_calibrations
+1572-                ])
+1573-
+1574-            #    result["lidar_transforms"] = torch.stack([
+1575-            #        torch.stack([
+1576-            #            torch.eye(4)
+1577-            #            for j in self.sensor_channels
+1578-            #            if j.startswith("LIDAR")
+1579-            #        ])
+1580-            #        for _ in frames
+1581-            #    ])
+1582-
+1583-        # ---------------------------
+1584-        # ego pose 相关输出
+1585-        # ---------------------------
+1586-        if self.enable_ego_transforms:
+1587-            # ego_transforms: [T, V, 4, 4]
+1588-            # 同一帧下对每个 sensor 复制一份 ego pose，保持维度兼容
+1589-            camera_channels = [
+1590-                s for s in self.sensor_channels
+1591-                if s.startswith("CAM") or s.startswith("cameras")
+1592-            ]
+1593-
+1594:            result["ego_transforms"] = torch.stack([
+1595-                torch.stack([
+1596-                    torch.tensor(
+1597-                        i.pose.transform,
+1598-                        dtype=torch.float32
+1599-                    ).reshape(4, 4)
+1600-                    for _ in camera_channels
+1601-                ])
+1602-                for i in frames
+1603-            ])
+1604-
+1605-        # ---------------------------
+1606-        # 3D box 图像
+1607-        # ---------------------------
+1608-        if self._3dbox_image_settings is not None:
+1609-            # 对每一帧的每个相机，利用激光标注 + 当前相机标定投影出 3D box
+1610-            result["3dbox_images"] = [
+1611-                [
+1612-                    MotionDataset.get_3dbox_image(
+1613-                        i.laser_labels,
+1614-                        MotionDataset.find_by_name(
+1615-                            i.context.camera_calibrations,
+1616-                            MotionDataset.sensor_name_id_dict[j]
+1617-                        ),
+1618-                        self._3dbox_image_settings
+1619-                    )
+1620-                    for j in self.sensor_channels
+1621-                    if j.startswith("CAM")
+1622-                ]
+1623-                for i in frames
+1624-            ]
+1625-
+1626-        # ---------------------------
+1627-        # HD map 图像
+1628-        # ---------------------------
+1629-        if self.hdmap_image_settings is not None:
+
+================================================================
+5. NuScenes camera_transforms / ego_transforms
+================================================================
+1513-                        "image_height": int(sample_data["height"]),
+1514-                        "image_width": int(sample_data["width"]),
+1515-                    }
+1516-                )
+1517-            if len(specs) == 0:
+1518-                raise ValueError("nuScenes instance flow requires at least one camera.")
+1519-            camera_specs.append(specs)
+1520-
+1521-        return render_instance_flow_images(
+1522-            frame_records,
+1523-            camera_specs,
+1524-            self.instance_flow_image_settings,
+1525-        )
+1526-
+1527-    def __init__(
+1528-        self, fs: fsspec.AbstractFileSystem, dataset_name: str,
+1529-        sequence_length: int, fps_stride_tuples: list, split=None,
+1530-        sensor_channels: list = ["CAM_FRONT"], keyframe_only: bool = False,
+1531-        enable_synchronization_check: bool = True,
+1532-        enable_scene_description: bool = False,
+1533:        enable_camera_transforms: bool = False,
+1534:        enable_ego_transforms: bool = False, enable_sample_data: bool = True,
+1535-        _3dbox_image_settings=None, hdmap_image_settings=None,
+1536-        image_segmentation_settings=None,
+1537-        foreground_region_image_settings=None, _3dbox_bev_settings=None,
+1538-        hdmap_bev_settings=None, image_description_settings=None,
+1539-        stub_key_data_dict=None,
+1540-        balanced_json_path=None, # 新增参数
+1541-        layout_token_settings: dict = None,
+1542-        instance_flow_image_settings=None,
+1543-        **kwargs
+1544-    
+1545-        
+1546-    ):
+1547-        self.fs = fs
+1548-        tables, self.indices = MotionDataset.load_tables(
+1549-            fs, dataset_name, MotionDataset.table_names,
+1550-            MotionDataset.prune_table_plan, MotionDataset.index_names, split)
+1551-        self.tables = tables
+1552-        ###########构建 scene name -> token########
+1553-        ##########################################
+1554-        self.scene_name_to_token = {}
+1555-
+1556-        for scene in tables["scene"]:
+1557-            self.scene_name_to_token[scene["name"]] = scene["token"]
+1558-        self.sequence_length = sequence_length
+1559-        self.sensor_channels = sensor_channels # 确保这里存了传感器列表
+1560-        self.fps_stride_tuples = fps_stride_tuples
+1561-        self.enable_scene_description = enable_scene_description
+1562:        self.enable_camera_transforms = enable_camera_transforms
+1563:        self.enable_ego_transforms = enable_ego_transforms
+1564-        self.enable_sample_data = enable_sample_data
+1565-        self._3dbox_image_settings = _3dbox_image_settings
+1566-        self.hdmap_image_settings = hdmap_image_settings
+1567-        self.image_segmentation_settings = image_segmentation_settings
+1568-        self.foreground_region_image_settings = \
+1569-            foreground_region_image_settings
+1570-        self._3dbox_bev_settings = _3dbox_bev_settings
+1571-        self.hdmap_bev_settings = hdmap_bev_settings
+1572-        self.image_description_settings = image_description_settings
+1573-        self.stub_key_data_dict = stub_key_data_dict
+1574-        self.layout_token_settings = layout_token_settings
+1575-        self.instance_flow_image_settings = instance_flow_image_settings
+1576-        self.items = [] 
+1577-        self.motion_intervals = []
+1578-        # cache the map data
+1579-        if (
+1580-            self.hdmap_image_settings is not None or
+1581-            self.hdmap_bev_settings is not None
+1582-        ):
+1583-            self.map_expansion = {}
+1584-            self.map_expansion_dict = {}
+1585-            for i in tables["log"]:
+1586-                to_dict = ["node", "polygon"]
+1587-                if i["location"] not in self.map_expansion:
+1588-                    name = "expansion/{}.json".format(i["location"])
+1589-                    self.map_expansion[i["location"]] = json.loads(
+1590-                        fs.cat_file(name).decode())
+1591-                    self.map_expansion_dict[i["location"]] = {}
+1592-                    for j in to_dict:
+1593-                        self.map_expansion_dict[i["location"]][j] = {
+1594-                            k["token"]: k
+1595-                            for k in self.map_expansion[i["location"]][j]
+1596-                        }
+1597-
+1598-        key_filter = (lambda i: i["is_key_frame"]) if keyframe_only else (lambda _: True)
+--
+1937-       # result["pts"] = torch.tensor([
+1938-       #     [
+1939-       #         (j["timestamp"] - segment[0][0]["timestamp"] + 500) // 1000
+1940-       #         for j in i
+1941-       #     ]
+1942-       #     for i in segment
+1943-       # ], dtype=torch.float32)
+1944-        images = []
+1945-        for i in segment:
+1946-            images_i = self.get_images(
+1947-                self.fs, self.tables, self.indices, i
+1948-            )
+1949-            if len(images_i) > 0:
+1950-                images.append(images_i)
+1951-
+1952-        if len(images) > 0:
+1953-            result["images"] = images  # [sequence_length, view_count]
+1954-
+1955-        if self.enable_camera_transforms:
+1956-            if "images" in result:
+1957:                result["camera_transforms"] = torch.stack([
+1958-                    torch.stack([
+1959-                        MotionDataset.get_transform(
+1960-                            self.tables, self.indices, "calibrated_sensor",
+1961-                            j["calibrated_sensor_token"], "pt")
+1962-                        for j in i
+1963-                        if MotionDataset.check_sensor(
+1964-                            self.tables, self.indices, j,
+1965-                            modality="camera")
+1966-                    ])
+1967-                    for i in segment
+1968-                ])
+1969-                result["camera_intrinsics"] = torch.stack([
+1970-                    torch.stack([
+1971-                        torch.tensor(
+1972-                            MotionDataset.query(
+1973-                                self.tables, self.indices,
+1974-                                "calibrated_sensor",
+1975-                                j["calibrated_sensor_token"]
+1976-                            )["camera_intrinsic"], dtype=torch.float32)
+1977-                        for j in i
+1978-                        if MotionDataset.check_sensor(
+1979-                            self.tables, self.indices, j,
+1980-                            modality="camera")
+1981-                    ])
+1982-                    for i in segment
+1983-                ])
+1984-                result["image_size"] = torch.stack([
+1985-                    torch.stack([
+1986-                        torch.tensor(
+1987-                            [j["width"], j["height"]], dtype=torch.long)
+1988-                        for j in i
+1989-                        if MotionDataset.check_sensor(
+1990-                            self.tables, self.indices, j,
+1991-                            modality="camera")
+1992-                    ])
+1993-                    for i in segment
+1994-                ])
+1995-
+1996-        if self.enable_ego_transforms:
+1997:            result["ego_transforms"] = torch.stack([
+1998-                torch.stack([
+1999-                    dwm.datasets.common.get_transform(
+2000-                        j["rotation"], j["translation"], "pt")
+2001-                    for j, s in zip(i, self.sensor_channels)
+2002-                    if s != "LIDAR_TOP"
+2003-                ])
+2004-                for i in segment
+2005-            ])
+2006-            
+2007-        if self._3dbox_image_settings is not None:
+2008-            result["3dbox_images"] = [
+2009-                [
+2010-                    MotionDataset.get_3dbox_image(
+2011-                        self.tables, self.indices, j,
+2012-                        self._3dbox_image_settings)
+2013-                    for j in i
+2014-                    if MotionDataset.check_sensor(
+2015-                        self.tables, self.indices, j, modality="camera")
+2016-                ]
+2017-                for i in segment
+2018-            ]
+2019-
+2020-        if self.hdmap_image_settings is not None:
+2021-            result["hdmap_images"] = [
+2022-                [
+2023-                    MotionDataset.get_hdmap_image(
+2024-                        self.map_expansion, self.map_expansion_dict,
+2025-                        self.tables, self.indices, j,
+2026-                        self.hdmap_image_settings)
+2027-                    for j in i
+2028-                    if MotionDataset.check_sensor(
+2029-                        self.tables, self.indices, j, modality="camera")
+2030-                ]
+2031-                for i in segment
+2032-            ]
+
+================================================================
+6. Argoverse camera_transforms / ego_transforms
+================================================================
+1291-                    {
+1292-                        "intrinsic": intrinsic,
+1293-                        "camera_from_frame": camera_from_frame,
+1294-                        "image_width": int(image_size[0]),
+1295-                        "image_height": int(image_size[1]),
+1296-                    }
+1297-                )
+1298-            camera_specs.append(specs)
+1299-
+1300-        return render_instance_flow_images(
+1301-            frame_records,
+1302-            camera_specs,
+1303-            self.instance_flow_image_settings,
+1304-        )
+1305-
+1306-    def __init__(
+1307-        self, fs: dwm.fs.czip.CombinedZipFileSystem, sequence_length: int,
+1308-        fps_stride_tuples: list,
+1309-        sensor_channels: list = ["cameras/ring_front_left"],
+1310-        hide_lidar: bool = True, enable_synchronization_check: bool = True,
+1311:        enable_camera_transforms: bool = False,
+1312:        enable_ego_transforms: bool = False, _3dbox_image_settings=None,
+1313-        hdmap_image_settings=None, _3dbox_bev_settings=None,
+1314-        hdmap_bev_settings=None, image_description_settings=None,
+1315-        stub_key_data_dict=None,
+1316-        balanced_json_path=None,
+1317-        index_json_path=None,
+1318-        dataset_root=None,
+1319-        scene_dirs=None,
+1320-        layout_token_settings: dict = None,
+1321-        instance_flow_image_settings=None,
+1322-        split: str = "train" 
+1323-    ):
+1324-        self.fs = fs
+1325-        self.sequence_length = sequence_length
+1326-        self.fps_stride_tuples = fps_stride_tuples
+1327-        self.sensor_channels = sensor_channels
+1328-        self.hide_lidar = True
+1329:        self.enable_camera_transforms = enable_camera_transforms
+1330:        self.enable_ego_transforms = enable_ego_transforms
+1331-        self._3dbox_image_settings = _3dbox_image_settings
+1332-        self.hdmap_image_settings = hdmap_image_settings
+1333-        self._3dbox_bev_settings = _3dbox_bev_settings
+1334-        self.hdmap_bev_settings = hdmap_bev_settings
+1335-        self.image_description_settings = image_description_settings
+1336-        self.index_json_path = index_json_path
+1337-        self.stub_key_data_dict = {} if stub_key_data_dict is None \
+1338-            else stub_key_data_dict
+1339-        self.split = split
+1340-        self.dataset_root = dataset_root
+1341-        self.layout_token_settings = layout_token_settings
+1342-        self.instance_flow_image_settings = instance_flow_image_settings
+1343-        #if index_json_path is None:
+1344-         #   raise RuntimeError("index_json_path required")
+1345-
+1346-        #with open(index_json_path, "r") as f:
+1347-        #    index_entries = json.load(f)
+1348-
+1349-        #print("[Dataset] Index entries:", len(index_entries))
+1350-        ###从json读取###3
+1351-        filename_dict = {}
+1352-        scene_channel_sample_data = {}
+1353-        scene_map_dict = {}
+1354-        scene_split_dict = {}
+1355-         # 重新定义正则，以适配你 JSON 里的路径格式 (train/scene_id/sensors/cameras/...)
+1356-        # 注意：正则需要匹配你 JSON 中 "files" 列表里的字符串格式
+1357-        pattern = re.compile(
+1358-            "^(?P<split>\\w+)/(?P<scene_id>[^/]+)/sensors/"
+1359-            "(?P<sensor_channel>{})/"
+1360-            "(?P<timestamp>\\d+).+$".format(
+1361-                "|".join([re.escape(s) for s in sensor_channels])
+1362-            ))
+1363-        
+1364-        map_pattern = re.compile(
+1365-            "^(?P<split>\\w+)/(?P<scene_id>[^/]+)/map/"
+--
+1659-
+1660-        if len(images) > 0:
+1661-            result["images"] = images  # [sequence_length, view_count]
+1662-
+1663-        extrinsics, intrinsics = None, None
+1664-
+1665-        if self.enable_camera_transforms:
+1666-            if "images" in result:
+1667-
+1668-                # ===== extrinsics =====
+1669-                extrinsic_path = os.path.join(
+1670-                    item["split"],
+1671-                    item["scene_id"],
+1672-                    "calibration",
+1673-                    "egovehicle_SE3_sensor.feather"
+1674-                )
+1675-
+1676-                with self.fs.open(extrinsic_path) as f:
+1677-                    extrinsics = pyarrow.feather.read_table(f).to_pydict()
+1678-
+1679:                result["camera_transforms"] = torch.stack([
+1680-                    torch.stack([
+1681-                        MotionDataset.get_transform(
+1682-                            extrinsics, "sensor_name", j["sensor"][8:], "pt"
+1683-                        )
+1684-                        for j in i if j["sensor"].startswith("cameras")
+1685-                    ])
+1686-                    for i in item["segment"]
+1687-                ])
+1688-
+1689-                # ===== intrinsics =====
+1690-                intrinsic_path = os.path.join(
+1691-                    item["split"],
+1692-                    item["scene_id"],
+1693-                    "calibration",
+1694-                    "intrinsics.feather"
+1695-                )
+1696-
+1697-                with self.fs.open(intrinsic_path) as f:
+1698-                    intrinsics = pyarrow.feather.read_table(f).to_pydict()
+1699-
+1700-                result["camera_intrinsics"] = torch.stack([
+1701-                    torch.stack([
+1702-                        dwm.datasets.common.make_intrinsic_matrix(
+1703-                            MotionDataset.feather_query(
+1704-                                intrinsics, "sensor_name", j["sensor"][8:],
+1705-                                MotionDataset.intrinsic_focal_keys
+1706-                            ),
+1707-                            MotionDataset.feather_query(
+1708-                                intrinsics, "sensor_name", j["sensor"][8:],
+1709-                                MotionDataset.intrinsic_center_keys
+1710-                            ),
+1711-                            "pt"
+1712-                        )
+1713-                        for j in i if j["sensor"].startswith("cameras")
+1714-                    ])
+--
+1717-                result["image_size"] = torch.stack([
+1718-                    torch.stack([
+1719-                        torch.tensor(
+1720-                            MotionDataset.feather_query(
+1721-                                intrinsics, "sensor_name", j["sensor"][8:],
+1722-                                MotionDataset.intrinsic_size_keys),
+1723-                            dtype=torch.long)
+1724-                        for j in i
+1725-                        if j["sensor"].startswith("cameras")
+1726-                    ])
+1727-                    for i in item["segment"]
+1728-                ])
+1729-
+1730-        poses = None
+1731-        if self.enable_ego_transforms:
+1732-            pose_path = "{}/{}/city_SE3_egovehicle.feather"\
+1733-                .format(item["split"], item["scene_id"])
+1734-            with self.fs.open(pose_path) as f:
+1735-                poses = pyarrow.feather.read_table(f).to_pydict()
+1736-
+1737:            result["ego_transforms"] = torch.stack([
+1738-                torch.stack([
+1739-                    MotionDataset.get_transform(
+1740-                        poses, "timestamp_ns", j["timestamp"], "pt")
+1741-                    for j in i
+1742-                    if (
+1743-                        j["sensor"].startswith("cameras") #or
+1744-                        #(j["sensor"] == "lidar" and not self.hide_lidar)
+1745-                    )
+1746-                ])
+1747-                for i in item["segment"]
+1748-            ])
+1749-
+1750-        annotations = None
+1751-        if self._3dbox_image_settings is not None:
+1752-            if poses is None:
+1753-                pose_path = "{}/{}/city_SE3_egovehicle.feather"\
+1754-                    .format(item["split"], item["scene_id"])
+1755-                with self.fs.open(pose_path) as f:
+1756-                    poses = pyarrow.feather.read_table(f).to_pydict()
+1757-
+1758-            if extrinsics is None:
+1759-                extrinsic_path = \
+1760-                    "{}/{}/calibration/egovehicle_SE3_sensor.feather"\
+1761-                    .format(item["split"], item["scene_id"])
+1762-                with self.fs.open(extrinsic_path) as f:
+1763-                    extrinsics = pyarrow.feather.read_table(f).to_pydict()
+1764-
+1765-            if intrinsics is None:
+1766-                intrinsic_path = "{}/{}/calibration/intrinsics.feather"\
+1767-                    .format(item["split"], item["scene_id"])
+1768-                with self.fs.open(intrinsic_path) as f:
+1769-                    intrinsics = pyarrow.feather.read_table(f).to_pydict()
+1770-
+1771-            if self.sensor_channels[0] != "lidar":
+1772-                raise Exception(
+
+================================================================
+7. NuPlan camera_transforms / ego_transforms
+================================================================
+638-        fps_stride_tuples=(),
+639-        sensor_channels=('CAM_L1','CAM_L0','CAM_F0','CAM_R0','CAM_R1','CAM_R2','CAM_B0','CAM_L2'),
+640-        scene_key="db_name",
+641-        timestamp_key="timestamp",
+642-        token_key="token",
+643-        enable_synchronization_check=True,
+644-        max_time_error_ratio=0.5,
+645-        max_time_error_us=None,
+646-        enable_sample_data=False,
+647-        _3dbox_pen_width=8,
+648-        hdmap_pen_width=8,
+649-        hdmap_patch_radius=100.0,
+650-        near_plane=1e-8,
+651-        min_polygon_area=2000,
+652-        cam_key="cam",
+653-        ego2global_key="ego2global",
+654-        stub_key_data_dict=None,
+655-        image_description_settings=None,
+656-        projected_pc_settings=None, 
+657-        balanced_json_path=None,
+658:        enable_camera_transforms=None,
+659:        enable_ego_transforms=None,
+660-        _3dbox_image_settings= None,
+661-        hdmap_image_settings=None,
+662-        layout_token_settings: dict = None,
+663-        hdmap_bev_settings=None,
+664-        enable_3dbox_records: bool = False,
+665-        instance_flow_image_settings=None,
+666-        
+667-    ):
+668-        self.sensor_root = sensor_root
+669-        self.cache_root = cache_root
+670-        self.dataset_root = dataset_root
+671-        self.map_factory = NuPlanMapFactory(get_maps_db(map_root=map_root, map_version=map_version))
+672-
+673-        self.sequence_length = int(sequence_length)
+674-
+675-        DEFAULT_OVERLAP_RATIO = 0.75
+676-
+677-        self.fps_stride_tuples = []
+678-        self.overlap_ratio_by_cfg = {}
+679-        self.overlap_ratio_by_fps = {}
+680-        self.layout_token_settings = layout_token_settings
+681-        self._3dbox_image_settings = _3dbox_image_settings
+682-        self.hdmap_image_settings = hdmap_image_settings
+683-        self.hdmap_bev_settings = hdmap_bev_settings
+684-        self.instance_flow_image_settings = instance_flow_image_settings
+685-        self.enable_3dbox_records = bool(enable_3dbox_records)
+686-        for fps_stride_cfg in fps_stride_tuples:
+687-            if len(fps_stride_cfg) == 2:
+688-                fps, stride = fps_stride_cfg
+689-                overlap_ratio = DEFAULT_OVERLAP_RATIO
+690-            elif len(fps_stride_cfg) == 3:
+691-                fps, stride, overlap_ratio = fps_stride_cfg
+692-            else:
+693-                raise ValueError(
+694-                    "Each item in fps_stride_tuples must be "
+--
+2594-            # write to result (only what requested)
+2595-            if want_depth_out:
+2596-                result["proj_depth"] = torch.stack(proj_depth, 0)
+2597-            if want_sem_out:
+2598-                result["proj_sem"]   = torch.stack(proj_sem,   0)
+2599-            if want_clr_out:
+2600-                result["proj_clr"]   = torch.stack(proj_clr,   0)
+2601-            if read_vis_depth:
+2602-                result["vis_depth"]  = torch.stack(proj_vis,   0)
+2603-               '''
+2604-        # camera_transforms: ego_from_camera
+2605-        if "camera_transforms" not in result:
+2606-            cam_T = []
+2607-            for row_infos in cam_infos:  # [V]
+2608-                row_T = []
+2609-                for ci in row_infos:
+2610-                    if ci is None:
+2611-                        raise KeyError("Missing NuPlan camera calibration.")
+2612-                    row_T.append(_se3_from_qt(ci["sensor2ego_rotation"], ci["sensor2ego_translation"]))
+2613-                cam_T.append(row_T)
+2614:            result["camera_transforms"] = torch.tensor(np.asarray(cam_T), dtype=torch.float32)  # [T,V,4,4]
+2615-
+2616-        # ego_transforms: world_from_ego (same per view in a frame)
+2617-        if "ego_transforms" not in result:
+2618-            ego_T = []
+2619-            V = len(self.sensor_channels)
+2620-            for x in seq:
+2621-                world_from_ego = np.asarray(x[self.ego2global_key], np.float32)
+2622-                ego_T.append([world_from_ego] * V)
+2623:            result["ego_transforms"] = torch.tensor(np.asarray(ego_T), dtype=torch.float32)  # [T,V,4,4]
+2624-
+2625-        #if "lidar_transforms" not in result:
+2626-         #   T = len(seq)
+2627-          #  I4 = torch.eye(4, dtype=torch.float32)
+2628-           # result["lidar_transforms"] = I4.view(1, 1, 4, 4).repeat(T, 1, 1, 1)  # [T,1,4,4]
+2629-            
+2630-        dwm.datasets.common.add_stub_key_data(self.stub_key_data_dict, result)
+2631-        
+2632-        if "image_description" not in result:
+2633-            T = len(seq)
+2634-            V = len(self.sensor_channels)
+2635-
+2636-            db_name = seq[0].get("db_name", None)
+2637-
+2638-            cap = self.text_anno.get(db_name, {}) or {}
+2639-            text_main = make_image_description_string(cap, self.text_settings)
+2640-
+2641-            tail = f"This is a nuplan video clip from {location}" if location else "This is a nuplan video clip"
+2642-            text = f"{text_main}. {tail}" if text_main else tail
+2643-
+2644-            result["image_description"] = [[text] * V for _ in range(T)]
+2645-                
+2646-        return result
+
+================================================================
+8. Camera calibration / extrinsic helpers
+================================================================
+src/dwm/datasets/track_pv/argoverse.py:230:        annotations: dict, ref_timestamp: int, extrinsics: dict,
+src/dwm/datasets/track_pv/argoverse.py:254:        ego_from_camera = MotionDataset.get_transform(
+src/dwm/datasets/track_pv/argoverse.py:255:            extrinsics, "sensor_name", sensor_name)
+src/dwm/datasets/track_pv/argoverse.py:261:            world_from_ego @ ego_from_camera, world_from_ref)
+src/dwm/datasets/track_pv/argoverse.py:291:        map: dict, extrinsics: dict, intrinsics: dict, poses: dict,
+src/dwm/datasets/track_pv/argoverse.py:311:        ego_from_camera = MotionDataset.get_transform(
+src/dwm/datasets/track_pv/argoverse.py:312:            extrinsics, "sensor_name", sensor_name)
+src/dwm/datasets/track_pv/argoverse.py:315:        camera_from_world = np.linalg.inv(world_from_ego @ ego_from_camera)
+src/dwm/datasets/track_pv/argoverse.py:862:        extrinsics,
+src/dwm/datasets/track_pv/argoverse.py:913:            ego_from_camera = MotionDataset.get_transform(
+src/dwm/datasets/track_pv/argoverse.py:914:                extrinsics,
+src/dwm/datasets/track_pv/argoverse.py:932:                world_from_camera_ego @ ego_from_camera,
+src/dwm/datasets/track_pv/argoverse.py:979:        extrinsics=None,
+src/dwm/datasets/track_pv/argoverse.py:1084:                if extrinsics is None or intrinsics is None:
+src/dwm/datasets/track_pv/argoverse.py:1090:                        extrinsics,
+src/dwm/datasets/track_pv/argoverse.py:1153:        extrinsics,
+src/dwm/datasets/track_pv/argoverse.py:1276:                ego_from_camera = MotionDataset.get_transform(
+src/dwm/datasets/track_pv/argoverse.py:1277:                    extrinsics,
+src/dwm/datasets/track_pv/argoverse.py:1287:                    world_from_camera_ego @ ego_from_camera,
+src/dwm/datasets/track_pv/argoverse.py:1663:        extrinsics, intrinsics = None, None
+src/dwm/datasets/track_pv/argoverse.py:1668:                # ===== extrinsics =====
+src/dwm/datasets/track_pv/argoverse.py:1669:                extrinsic_path = os.path.join(
+src/dwm/datasets/track_pv/argoverse.py:1676:                with self.fs.open(extrinsic_path) as f:
+src/dwm/datasets/track_pv/argoverse.py:1677:                    extrinsics = pyarrow.feather.read_table(f).to_pydict()
+src/dwm/datasets/track_pv/argoverse.py:1682:                            extrinsics, "sensor_name", j["sensor"][8:], "pt"
+src/dwm/datasets/track_pv/argoverse.py:1758:            if extrinsics is None:
+src/dwm/datasets/track_pv/argoverse.py:1759:                extrinsic_path = \
+src/dwm/datasets/track_pv/argoverse.py:1762:                with self.fs.open(extrinsic_path) as f:
+src/dwm/datasets/track_pv/argoverse.py:1763:                    extrinsics = pyarrow.feather.read_table(f).to_pydict()
+src/dwm/datasets/track_pv/argoverse.py:1785:                        extrinsics, intrinsics, poses, cam_data,
+src/dwm/datasets/track_pv/argoverse.py:1801:            if extrinsics is None:
+src/dwm/datasets/track_pv/argoverse.py:1802:                extrinsic_path = (
+src/dwm/datasets/track_pv/argoverse.py:1806:                with self.fs.open(extrinsic_path) as file_obj:
+src/dwm/datasets/track_pv/argoverse.py:1807:                    extrinsics = pyarrow.feather.read_table(file_obj).to_pydict()
+src/dwm/datasets/track_pv/argoverse.py:1824:                extrinsics,
+src/dwm/datasets/track_pv/argoverse.py:1836:            if extrinsics is None:
+src/dwm/datasets/track_pv/argoverse.py:1837:                extrinsic_path = \
+src/dwm/datasets/track_pv/argoverse.py:1840:                with self.fs.open(extrinsic_path) as f:
+src/dwm/datasets/track_pv/argoverse.py:1841:                    extrinsics = pyarrow.feather.read_table(f).to_pydict()
+src/dwm/datasets/track_pv/argoverse.py:1865:                        map, extrinsics, intrinsics, poses, j,
+src/dwm/datasets/track_pv/argoverse.py:1949:            if extrinsics is None:
+src/dwm/datasets/track_pv/argoverse.py:1950:                extrinsic_path = \
+src/dwm/datasets/track_pv/argoverse.py:1953:                with self.fs.open(extrinsic_path) as f:
+src/dwm/datasets/track_pv/argoverse.py:1954:                    extrinsics = pyarrow.feather.read_table(f).to_pydict()
+src/dwm/datasets/track_pv/argoverse.py:1975:                        extrinsics=extrinsics,
+src/dwm/datasets/track_pv/nuplan.py:1069:    def _perspective_coords(self, points, im_size, ego2global_t, ego2global_r, sensor2ego_t, sensor2ego_r, cam_intrinsic, is_polygon):
+src/dwm/datasets/track_pv/nuplan.py:1075:        points = points - np.array(sensor2ego_t).reshape((-1, 1))
+src/dwm/datasets/track_pv/nuplan.py:1076:        points = np.dot(Quaternion(sensor2ego_r).rotation_matrix.T, points)
+src/dwm/datasets/track_pv/nuplan.py:1575:        sensor2ego_t = np.asarray(cam_info["sensor2ego_translation"], np.float32)
+src/dwm/datasets/track_pv/nuplan.py:1576:        sensor2ego_r = cam_info["sensor2ego_rotation"]
+src/dwm/datasets/track_pv/nuplan.py:1601:                sensor2ego_t, sensor2ego_r,
+src/dwm/datasets/track_pv/nuplan.py:1622:                sensor2ego_t, sensor2ego_r,
+src/dwm/datasets/track_pv/nuplan.py:1642:                sensor2ego_t, sensor2ego_r,
+src/dwm/datasets/track_pv/nuplan.py:2604:        # camera_transforms: ego_from_camera
+src/dwm/datasets/track_pv/nuplan.py:2612:                    row_T.append(_se3_from_qt(ci["sensor2ego_rotation"], ci["sensor2ego_translation"]))
+src/dwm/datasets/track_pv/nuscenes.py:79:        "calibrated_sensor", "category", "ego_pose", "instance", "log", "map",
+src/dwm/datasets/track_pv/nuscenes.py:88:        "calibrated_sensor.token", "category.token", "ego_pose.token",
+src/dwm/datasets/track_pv/nuscenes.py:209:        calibrated_sensor = MotionDataset.query(
+src/dwm/datasets/track_pv/nuscenes.py:210:            tables, indices, "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:211:            sample_data["calibrated_sensor_token"])
+src/dwm/datasets/track_pv/nuscenes.py:213:            tables, indices, "sensor", calibrated_sensor["sensor_token"])
+src/dwm/datasets/track_pv/nuscenes.py:417:        calibrated_sensor = MotionDataset.query(
+src/dwm/datasets/track_pv/nuscenes.py:418:            tables, indices, "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:419:            sample_data["calibrated_sensor_token"])
+src/dwm/datasets/track_pv/nuscenes.py:421:        intrinsic[:3, :3] = np.array(calibrated_sensor["camera_intrinsic"])
+src/dwm/datasets/track_pv/nuscenes.py:423:        ego_from_camera = dwm.datasets.common.get_transform(
+src/dwm/datasets/track_pv/nuscenes.py:424:            calibrated_sensor["rotation"], calibrated_sensor["translation"])
+src/dwm/datasets/track_pv/nuscenes.py:427:        camera_from_world = np.linalg.inv(world_from_ego @ ego_from_camera)
+src/dwm/datasets/track_pv/nuscenes.py:513:        calibrated_sensor = MotionDataset.query(
+src/dwm/datasets/track_pv/nuscenes.py:514:            tables, indices, "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:515:            sample_data["calibrated_sensor_token"])
+src/dwm/datasets/track_pv/nuscenes.py:517:        intrinsic[:3, :3] = np.array(calibrated_sensor["camera_intrinsic"])
+src/dwm/datasets/track_pv/nuscenes.py:518:        ego_from_camera = dwm.datasets.common.get_transform(
+src/dwm/datasets/track_pv/nuscenes.py:519:            calibrated_sensor["rotation"], calibrated_sensor["translation"])
+src/dwm/datasets/track_pv/nuscenes.py:522:        camera_from_world = np.linalg.inv(world_from_ego @ ego_from_camera)
+src/dwm/datasets/track_pv/nuscenes.py:581:        calibrated_sensor = MotionDataset.query(
+src/dwm/datasets/track_pv/nuscenes.py:582:            tables, indices, "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:583:            sample_data["calibrated_sensor_token"])
+src/dwm/datasets/track_pv/nuscenes.py:585:        intrinsic[:3, :3] = np.array(calibrated_sensor["camera_intrinsic"])
+src/dwm/datasets/track_pv/nuscenes.py:587:        ego_from_camera = dwm.datasets.common.get_transform(
+src/dwm/datasets/track_pv/nuscenes.py:588:            calibrated_sensor["rotation"], calibrated_sensor["translation"])
+src/dwm/datasets/track_pv/nuscenes.py:591:        camera_from_world = np.linalg.inv(world_from_ego @ ego_from_camera)
+src/dwm/datasets/track_pv/nuscenes.py:1154:        calibrated_sensor = MotionDataset.query(
+src/dwm/datasets/track_pv/nuscenes.py:1157:            "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:1158:            camera_sample_data["calibrated_sensor_token"],
+src/dwm/datasets/track_pv/nuscenes.py:1171:            calibrated_sensor["camera_intrinsic"],
+src/dwm/datasets/track_pv/nuscenes.py:1175:        ego_from_camera = dwm.datasets.common.get_transform(
+src/dwm/datasets/track_pv/nuscenes.py:1176:            calibrated_sensor["rotation"],
+src/dwm/datasets/track_pv/nuscenes.py:1177:            calibrated_sensor["translation"],
+src/dwm/datasets/track_pv/nuscenes.py:1191:            world_from_camera_ego @ ego_from_camera,
+src/dwm/datasets/track_pv/nuscenes.py:1487:                calibrated_sensor = MotionDataset.query(
+src/dwm/datasets/track_pv/nuscenes.py:1490:                    "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:1491:                    sample_data["calibrated_sensor_token"],
+src/dwm/datasets/track_pv/nuscenes.py:1494:                    calibrated_sensor["camera_intrinsic"],
+src/dwm/datasets/track_pv/nuscenes.py:1497:                ego_from_camera = dwm.datasets.common.get_transform(
+src/dwm/datasets/track_pv/nuscenes.py:1498:                    calibrated_sensor["rotation"],
+src/dwm/datasets/track_pv/nuscenes.py:1499:                    calibrated_sensor["translation"],
+src/dwm/datasets/track_pv/nuscenes.py:1506:                    world_from_camera_ego @ ego_from_camera,
+src/dwm/datasets/track_pv/nuscenes.py:1960:                            self.tables, self.indices, "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:1961:                            j["calibrated_sensor_token"], "pt")
+src/dwm/datasets/track_pv/nuscenes.py:1974:                                "calibrated_sensor",
+src/dwm/datasets/track_pv/nuscenes.py:1975:                                j["calibrated_sensor_token"]
+src/dwm/datasets/track_pv/waymo.py:87:    extrinsic_correction = [
+src/dwm/datasets/track_pv/waymo.py:188:        ec = np.array(MotionDataset.extrinsic_correction)
+src/dwm/datasets/track_pv/waymo.py:189:        ego_from_camera = np.array(
+src/dwm/datasets/track_pv/waymo.py:190:            camera_calibration.extrinsic.transform).reshape(4, 4)
+src/dwm/datasets/track_pv/waymo.py:191:        image_from_ego = intrinsic @ ec @ np.linalg.inv(ego_from_camera)
+src/dwm/datasets/track_pv/waymo.py:271:        ec = np.array(MotionDataset.extrinsic_correction, np.float32)
+src/dwm/datasets/track_pv/waymo.py:272:        ego_from_camera = np.array(
+src/dwm/datasets/track_pv/waymo.py:273:            camera_calibration.extrinsic.transform, np.float32).reshape(4, 4)
+src/dwm/datasets/track_pv/waymo.py:276:            np.linalg.inv(world_from_ego @ ego_from_camera)
+src/dwm/datasets/track_pv/waymo.py:870:        ec = np.asarray(MotionDataset.extrinsic_correction, dtype=np.float32)
+src/dwm/datasets/track_pv/waymo.py:871:        ego_from_camera = np.asarray(
+src/dwm/datasets/track_pv/waymo.py:872:            camera_calibration.extrinsic.transform,
+src/dwm/datasets/track_pv/waymo.py:877:            image_from_ego = intrinsic @ ec @ np.linalg.inv(ego_from_camera)
+src/dwm/datasets/track_pv/waymo.py:1026:            MotionDataset.extrinsic_correction,
+src/dwm/datasets/track_pv/waymo.py:1102:                    calibration.extrinsic.transform,
+src/dwm/datasets/track_pv/waymo.py:1457:        # extrinsics  : 相机外参，按 [T, V, 4, 4] 组织
+src/dwm/datasets/track_pv/waymo.py:1460:        extrinsics = []
+src/dwm/datasets/track_pv/waymo.py:1489:                    calib.extrinsic.transform,
+src/dwm/datasets/track_pv/waymo.py:1505:            extrinsics.append(torch.stack(frame_extr))
+src/dwm/datasets/track_pv/waymo.py:1529:                # extrinsic_correction 的逆，用于和原版保持一致的相机坐标定义
+src/dwm/datasets/track_pv/waymo.py:1532:                        MotionDataset.extrinsic_correction,
+src/dwm/datasets/track_pv/waymo.py:1542:                            j.extrinsic.transform,
+
+================================================================
+9. camera2referego construction
+================================================================
+693-                added_time_ids = added_time_ids.to(device)
+694-
+695-            else:
+696-                added_time_ids = None
+697-
+698-        # required by the UniMLVG
+699-        if common_config.get("explicit_view_modeling", False):
+700-            assert "camera_intrinsics" in batch and \
+701-                "camera_transforms" in batch
+702-
+703-            # without ego_transforms or single frame
+704-            if "ego_transforms" not in batch:
+705-                ego_transforms = torch.eye(4).to(batch["camera_transforms"])
+706-                ego_transforms = ego_transforms.unsqueeze(0).unsqueeze(1).unsqueeze(2).expand(
+707-                    batch["camera_transforms"].shape[0],
+708-                    batch["camera_transforms"].shape[1],
+709-                    batch["camera_transforms"].shape[2],
+710-                    -1,
+711-                    -1,
+712-                )
+713-            else:
+714-                ego_transforms = batch["ego_transforms"][
+715-                    :, :, -batch["camera_transforms"].shape[2]:, ...
+716-                ]
+717-
+718:            camera2world = ego_transforms @ batch["camera_transforms"]
+719:            camera2referego = torch.linalg.inv(
+720-                ego_transforms[:, 0, 0, :, :].unsqueeze(1).unsqueeze(2)
+721:            ) @ camera2world
+722-
+723-            camera_intrinsics_norm = batch["camera_intrinsics"].clone()
+724-            camera_intrinsics_norm[..., 0, 0] = \
+725-                camera_intrinsics_norm[..., 0, 0] / batch["image_size"][..., 0]
+726-            camera_intrinsics_norm[..., 1, 1] = \
+727-                camera_intrinsics_norm[..., 1, 1] / batch["image_size"][..., 1]
+728-            camera_intrinsics_norm[..., 0, 2] = \
+729-                camera_intrinsics_norm[..., 0, 2] / batch["image_size"][..., 0]
+730-            camera_intrinsics_norm[..., 1, 2] = \
+731-                camera_intrinsics_norm[..., 1, 2] / batch["image_size"][..., 1]
+732-
+733-            if "is_uncalibrated" in batch:
+734-                camera_intrinsics_norm[batch["is_uncalibrated"], :, :] = \
+735-                    torch.eye(3).to(batch["camera_transforms"])
+736:                camera2referego[batch["is_uncalibrated"], :, :] = \
+737-                    torch.eye(4).to(batch["camera_transforms"])
+738-
+739-            if explicit_view_modeling_mask is not None:
+740-                camera_intrinsics_norm[
+741-                    explicit_view_modeling_mask.logical_not().to(device)
+742-                ] = torch.eye(3).to(batch["camera_transforms"])
+743-
+744:                camera2referego[
+745-                    explicit_view_modeling_mask.logical_not().to(device)
+746-                ] = torch.eye(4).to(batch["camera_transforms"])
+747-
+748-            # ---- fp16 / explicit geometry safety clamp 防止 Nan ----
+749-            explicit_clip_cfg = common_config.get("explicit_geometry_clip", {})
+750-
+751-            if explicit_clip_cfg.get("enabled", False):
+752-                trans_clip = float(explicit_clip_cfg.get("translation_clip", 100.0))
+753-
+754-                fp16_max = float(torch.finfo(torch.float16).max)
+755-                hard_clip = float(explicit_clip_cfg.get("hard_clip", 4096.0))
+756-                hard_clip = min(hard_clip, fp16_max)
+757-
+758-                intrinsics_clip = float(explicit_clip_cfg.get("intrinsics_clip", 8.0))
+759-
+760:                trans = camera2referego[..., :3, 3]
+761:                camera2referego[..., :3, 3] = trans.clamp(
+762-                    min=-trans_clip,
+763-                    max=trans_clip,
+764-                )
+765-
+766:                camera2referego = torch.nan_to_num(
+767:                    camera2referego,
+768-                    nan=0.0,
+769-                    posinf=hard_clip,
+770-                    neginf=-hard_clip,
+771-                )
+772:                camera2referego = camera2referego.clamp(
+773-                    min=-hard_clip,
+774-                    max=hard_clip,
+775-                )
+776-
+777:                camera2referego[..., 3, :] = camera2referego.new_tensor(
+778-                    [0.0, 0.0, 0.0, 1.0]
+779-                )
+780-
+781-                camera_intrinsics_norm = torch.nan_to_num(
+782-                    camera_intrinsics_norm,
+783-                    nan=0.0,
+784-                    posinf=intrinsics_clip,
+785-                    neginf=-intrinsics_clip,
+786-                )
+787-                camera_intrinsics_norm = camera_intrinsics_norm.clamp(
+788-                    min=-intrinsics_clip,
+789-                    max=intrinsics_clip,
+790-                )
+791-
+792-                camera_intrinsics_norm[..., 2, :] = camera_intrinsics_norm.new_tensor(
+793-                    [0.0, 0.0, 1.0]
+794-                )
+795-            if (
+796-                common_config.get("petr_visualize_geometry", False)
+797-                and latents_shape is not None
+798-            ):
+799-                rank = (
+800-                    torch.distributed.get_rank()
+801-                    if torch.distributed.is_initialized()
+802-                    else 0
+803-                )
+804-
+805-                run_this_rank = (
+806-                    rank == 0
+807-                    or common_config.get("petr_visualize_all_ranks", False)
+808-                )
+809-
+810-                if run_this_rank:
+811-                    vis_root = common_config.get(
+812-                        "petr_visualize_output_root",
+813-                        "./debug_petr_vis",
+814-                    )
+815-                    os.makedirs(vis_root, exist_ok=True)
+816-
+817-                    done_flag = os.path.join(
+818-                        vis_root,
+819-                        f"_petr_vis_done_rank{rank}.txt",
+820-                    )
+821-
+822-                    should_visualize = (
+823-                        not common_config.get("petr_visualize_once", True)
+824-                        or not os.path.exists(done_flag)
+825-                    )
+826-
+827-                    if should_visualize:
+828-                        from dwm.utils.petr_visualizer import visualize_petr_geometry
+829-
+830-                        visualize_petr_geometry(
+831-                            model=model,
+832-                            batch=batch,
+833-                            camera_intrinsics_norm=camera_intrinsics_norm,
+834:                            camera2referego=camera2referego,
+835-                            latents_shape=latents_shape,
+836-                            common_config=common_config,
+837-                            tag="conditions",
+838-                        )
+839-
+840-                        if common_config.get("petr_visualize_once", True):
+841-                            with open(done_flag, "w") as f:
+842-                                f.write("done\n")
+843-            if do_classifier_free_guidance:
+844-                camera_intrinsics_norm = torch.cat(
+845-                    [camera_intrinsics_norm, camera_intrinsics_norm], 0
+846-                )
+847:                camera2referego = torch.cat(
+848:                    [camera2referego, camera2referego], 0
+849-                )
+850-
+851-            camera_intrinsics_norm = camera_intrinsics_norm.to(device)
+852:            camera2referego = camera2referego.to(device)
+853-
+854-        # required by the HoloDrive
+855-        has_depth_input = "camera_intrinsics" in batch and \
+856-            "camera_transforms" in batch
+857-        if has_depth_input:
+858-            camera_intrinsics = batch["camera_intrinsics"].to(device)
+859-            camera_transforms = batch["camera_transforms"].to(device)
+860-            if do_classifier_free_guidance:
+861-                camera_intrinsics = torch.cat(
+862-                    [camera_intrinsics, camera_intrinsics])
+863-                camera_transforms = torch.cat(
+864-                    [camera_transforms, camera_transforms])
+865-        camera_param_token = None
+866-        camera_token_mask = None
+867-        bbox_token_input = None
+868-        bbox_class_input = None
+869-        bbox_mask_input = None
+870-
+871-        map_token_input = None
+872-
+873-        if common_config.get("camera_token_modeling", False):
+874-            camera_param_token = CrossviewTemporalSD.get_camera_param_token(
+875-                batch,
+876-                common_config,
+877-            ).to(device=device, dtype=dtype)
+878-
+879-            if do_classifier_free_guidance:
+880-                b, t, v = camera_param_token.shape[:3]
+881-
+882-                uncond_camera_token_mask = torch.zeros(
+883-                    b,
+884-                    t,
+885-                    v,
+886-                    device=device,
+887-                    dtype=dtype,
+888-                )
+889-                cond_camera_token_mask = torch.ones(
+890-                    b,
+891-                    t,
+892-                    v,
+893-                    device=device,
+894-                    dtype=dtype,
+895-                )
+896-
+897-                camera_param_token = torch.cat(
+--
+926-            "encoder_hidden_states": encoder_hidden_states,
+927-            "condition_image_tensor": condition_image_tensor,
+928-
+929-            "disable_crossview": torch.tensor(
+930-                [common_config.get("disable_crossview", False)],
+931-                device=device).repeat(batch_size),
+932-
+933-            "disable_temporal": torch.tensor(
+934-                [common_config.get("disable_temporal", False)],
+935-                device=device).repeat(batch_size),
+936-
+937-            "crossview_attention_mask": (
+938-                torch.cat([batch["crossview_mask"], batch["crossview_mask"]])
+939-                    if do_classifier_free_guidance else batch["crossview_mask"]
+940-            ).to(device)
+941-            if "crossview_mask" in batch else None,
+942-
+943-            "camera_intrinsics": camera_intrinsics if has_depth_input else
+944-            None,
+945-            "camera_transforms": camera_transforms if has_depth_input else
+946-            None,
+947-
+948-            "camera_intrinsics_norm": camera_intrinsics_norm
+949-            if common_config.get("explicit_view_modeling", False) else None,
+950-
+951:            "camera2referego": camera2referego
+952-            if common_config.get("explicit_view_modeling", False) else None,
+953-
+954-            "added_time_ids": added_time_ids
+955-            if "added_time_ids" in common_config else None,
+956-
+957-            "camera_param_token": camera_param_token,
+958-            "camera_token_mask": camera_token_mask,
+959-
+960-            "bbox_token_input": bbox_token_input,
+961-            "bbox_class_input": bbox_class_input,
+962-            "bbox_mask_input": bbox_mask_input,
+963-
+964-            "map_token_input": map_token_input,
+965-        }
+966-        optional_condition_keys = [
+967-            "camera_param_token",
+968-            "camera_token_mask",
+969-            "bbox_token_input",
+
+================================================================
+10. URoPE projected z / geometry
+================================================================
+278-        "bsij,bspj->bspi",
+279-        source_camera_to_world[..., :3, :3],
+280-        ray_directions_camera,
+281-    )
+282-
+283-    world_to_query_rotation = query_viewmats[..., :3, :3]
+284-    world_to_query_translation = query_viewmats[..., :3, 3]
+285-    ray_origins_query = torch.einsum(
+286-        "bij,bsj->bsi",
+287-        world_to_query_rotation,
+288-        ray_origins_world,
+289-    )
+290-    ray_origins_query = (
+291-        ray_origins_query
+292-        + world_to_query_translation[:, None, :]
+293-    )
+294-    ray_directions_query = torch.einsum(
+295-        "bij,bspj->bspi",
+296-        world_to_query_rotation,
+297-        ray_directions_world,
+298-    )
+299-
+300-    depth_indices = torch.arange(
+301-        depth_count,
+302-        device=source_viewmats.device,
+303-        dtype=torch.float32,
+304-    )
+305-    depth_bin_size = (max_depth - min_depth) / depth_count
+306-    depths = min_depth + depth_bin_size * depth_indices
+307-
+308:    points_query = ray_origins_query[:, None, :, None, :]
+309:    points_query = points_query + (
+310-        ray_directions_query[:, None]
+311-        * depths[None, :, None, None, None]
+312-    )
+313:    projected_points = torch.einsum(
+314-        "bij,bdspj->bdspi",
+315-        query_intrinsics,
+316:        points_query,
+317-    )
+318-
+319:    projected_z = projected_points[..., 2].abs() + 1e-5
+320:    key_x = projected_points[..., 0] / projected_z
+321:    key_y = projected_points[..., 1] / projected_z
+322:    key_x = key_x.clamp(
+323-        min=clamp_min,
+324-        max=clamp_max,
+325-    )
+326:    key_y = key_y.clamp(
+327-        min=clamp_min,
+328-        max=clamp_max,
+329-    )
+330-
+331:    key_x = key_x.reshape(
+332-        batch_size,
+333-        depth_count,
+334-        source_count * patch_count,
+335-    ).repeat_interleave(
+336-        group_size,
+337-        dim=1,
+338-    )
+339:    key_y = key_y.reshape(
+340-        batch_size,
+341-        depth_count,
+342-        source_count * patch_count,
+343-    ).repeat_interleave(
+344-        group_size,
+345-        dim=1,
+346-    )
+347-
+348-    active_head_count = depth_count * group_size
+349-    query_x = (grid_x + 0.5).reshape(
+350-        1,
+351-        1,
+352-        patch_count,
+353-    ).expand(
+354-        batch_size,
+355-        active_head_count,
+356-        patch_count,
+357-    )
+358-    query_y = (grid_y + 0.5).reshape(
+359-        1,
+360-        1,
+361-        patch_count,
+362-    ).expand(
+363-        batch_size,
+364-        active_head_count,
+365-        patch_count,
+366-    )
+367-
+368-    rope_block_dim = head_dim // 2
+369-    query_x_coefficients = _rope_coefficients(
+370-        query_x,
+371-        freq_base,
+372-        freq_scale,
+373-        rope_block_dim,
+374-        output_dtype,
+375-    )
+376-    query_y_coefficients = _rope_coefficients(
+377-        query_y,
+378-        freq_base,
+379-        freq_scale,
+380-        rope_block_dim,
+381-        output_dtype,
+382-    )
+383:    key_x_coefficients = _rope_coefficients(
+384:        key_x,
+385-        freq_base,
+386-        freq_scale,
+387-        rope_block_dim,
+388-        output_dtype,
+389-    )
+390:    key_y_coefficients = _rope_coefficients(
+391:        key_y,
+392-        freq_base,
+393-        freq_scale,
+394-        rope_block_dim,
+395-        output_dtype,
+396-    )
+397-    return (
+398-        query_x_coefficients,
+399-        query_y_coefficients,
+400:        key_x_coefficients,
+401:        key_y_coefficients,
+402-    )
+403-
+404-
+405-class URoPEDotProductAttention(torch.nn.Module):
+406-    """Local cross-view URoPE around PyTorch SDPA."""
+407-
+408-    def __init__(
+409-        self,
+410-        head_num: int,
+411-        head_dim: int,
+412-        min_depth: float = 2.0,
+413-        max_depth: float = 20.0,
+414-        freq_base: float = 100.0,
+415-        freq_scale: float = 1.0,
+416-        group_size: int = 4,
+417-        leaveout_head: int = 0,
+418-        camera_convention: str = "opencv",
+419-        clamp_min: float = -64.0,
+420-        clamp_max: float = 96.0,
+421-    ):
+422-        super().__init__()
+423-        if head_dim % 4 != 0:
+424-            raise ValueError(
+425-                "URoPE requires head_dim divisible by 4, got {}.".format(
+426-                    head_dim
+427-                )
+428-            )
+429-        if leaveout_head < 0 or leaveout_head >= head_num:
+430-            raise ValueError(
+431-                "leaveout_head must be in [0, head_num), got {}.".format(
+432-                    leaveout_head
+433-                )
+434-            )
+435-
+436-        active_head_count = head_num - leaveout_head
+437-        if active_head_count % group_size != 0:
+438-            raise ValueError(
+439-                "head_num - leaveout_head must be divisible by group_size. "
+440-                "Got {} - {} and group_size {}.".format(
+441-                    head_num,
+442-                    leaveout_head,
+443-                    group_size,
+444-                )
+445-            )
+446-        if not 0.0 < min_depth < max_depth:
+447-            raise ValueError(
+448-                "Depth range must satisfy 0 < min_depth < max_depth."
+449-            )
+450-
+451-        self.head_num = head_num
+452-        self.head_dim = head_dim
+453-        self.leaveout_head = leaveout_head
+454-        self.group_size = group_size
+455-        self.depth_count = active_head_count // group_size
+456-        self.min_depth = min_depth
+457-        self.max_depth = max_depth
+458-        self.freq_base = freq_base
+459-        self.freq_scale = freq_scale
+460-        self.camera_convention = camera_convention
+461-        self.clamp_min = clamp_min
+462-        self.clamp_max = clamp_max
+463-
+464-    def forward(
+465-        self,
+466-        query: torch.Tensor,
+467-        key: torch.Tensor,
+468-        value: torch.Tensor,
+469-        *,
+470-        query_viewmats: torch.Tensor,
+471-        query_intrinsics: torch.Tensor,
+--
+537-                "query_intrinsics has invalid shape {}.".format(
+538-                    tuple(query_intrinsics.shape)
+539-                )
+540-            )
+541-        if source_viewmats.shape != (
+542-            batch_size,
+543-            source_count,
+544-            4,
+545-            4,
+546-        ):
+547-            raise ValueError(
+548-                "source_viewmats has invalid shape {}.".format(
+549-                    tuple(source_viewmats.shape)
+550-                )
+551-            )
+552-        if source_intrinsics.shape != (
+553-            batch_size,
+554-            source_count,
+555-            3,
+556-            3,
+557-        ):
+558-            raise ValueError(
+559-                "source_intrinsics has invalid shape {}.".format(
+560-                    tuple(source_intrinsics.shape)
+561-                )
+562-            )
+563-
+564-        (
+565-            query_x_coefficients,
+566-            query_y_coefficients,
+567:            key_x_coefficients,
+568:            key_y_coefficients,
+569-        ) = _prepare_local_geometry_coefficients(
+570-            query_viewmats=query_viewmats,
+571-            query_intrinsics=query_intrinsics,
+572-            source_viewmats=source_viewmats,
+573-            source_intrinsics=source_intrinsics,
+574-            patch_width=patch_width,
+575-            patch_height=patch_height,
+576-            depth_count=self.depth_count,
+577-            group_size=self.group_size,
+578-            min_depth=self.min_depth,
+579-            max_depth=self.max_depth,
+580-            freq_base=self.freq_base,
+581-            freq_scale=self.freq_scale,
+582-            head_dim=self.head_dim,
+583-            camera_convention=self.camera_convention,
+584-            output_dtype=query.dtype,
+585-            clamp_min=self.clamp_min,
+586-            clamp_max=self.clamp_max,
+587-        )
+588-
+589-        active_head_count = head_count - self.leaveout_head
+590-        query_active = _apply_xy_rope(
+591-            query[:, :active_head_count],
+592-            query_x_coefficients,
+593-            query_y_coefficients,
+594-        )
+595-        key_active = _apply_xy_rope(
+596-            key[:, :active_head_count],
+597:            key_x_coefficients,
+598:            key_y_coefficients,
+599-        )
+600-        value_active = _apply_xy_rope(
+601-            value[:, :active_head_count],
+602:            key_x_coefficients,
+603:            key_y_coefficients,
+604-        )
+605-
+606-        if self.leaveout_head > 0:
+607-            query = torch.cat(
+608-                [
+609-                    query_active,
+610-                    query[:, active_head_count:],
+611-                ],
+612-                dim=1,
+613-            )
+614-            key = torch.cat(
+615-                [
+616-                    key_active,
+617-                    key[:, active_head_count:],
+618-                ],
+619-                dim=1,
+620-            )
+621-            value = torch.cat(
+622-                [
+623-                    value_active,
+624-                    value[:, active_head_count:],
+625-                ],
+626-                dim=1,
+627-            )
+628-        else:
+629-            query = query_active
+630-            key = key_active
+631-            value = value_active
+632-
+633-        if attention_mask is not None:
+634-            attention_mask = attention_mask.to(
+635-                device=query.device
+636-            )
+637-            if attention_mask.shape[-2:] != (
+638-                query_length,
+639-                key_length,
+640-            ):
+641-                raise ValueError(
+642-                    "Local URoPE attention mask ends with {}, expected "
+643-                    "({}, {}).".format(
+644-                        tuple(attention_mask.shape[-2:]),
+645-                        query_length,
+646-                        key_length,
+647-                    )
+648-                )
+649-
+650-        output = F.scaled_dot_product_attention(
+651-            query=query,
+652-            key=key,
+653-            value=value,
+654-            attn_mask=attention_mask,
+655-            dropout_p=dropout_p,
+656-            is_causal=is_causal,
+657-        )
+658-
+659-        output_active = _apply_xy_rope(
+660-            output[:, :active_head_count],
+661-            query_x_coefficients,
+662-            query_y_coefficients,
+663-            inverse=True,
+664-        )
+665-        if self.leaveout_head > 0:
+666-            output = torch.cat(
+667-                [
+668-                    output_active,
+669-                    output[:, active_head_count:],
+670-                ],
+671-                dim=1,
+672-            )
+673-        else:
+
+================================================================
+11. Current-time URoPE source/query geometry
+================================================================
+93-            self.qk_norm_q = qk_norm_helper.norm_q
+94-            self.qk_norm_k = qk_norm_helper.norm_k
+95-
+96-        self.urope_attention = CurrentTimeURoPEDotProductAttention(
+97-            head_num=num_attention_heads,
+98-            head_dim=attention_head_dim,
+99-            **(urope_config or {}),
+100-        )
+101-
+102-        self.norm_ff = torch.nn.LayerNorm(inner_dim)
+103-        self.ff_in = torch.nn.Linear(
+104-            inner_dim,
+105-            inner_dim * ff_mult,
+106-        )
+107-        self.ff_act = torch.nn.GELU(approximate="tanh")
+108-        self.ff_out = torch.nn.Linear(
+109-            inner_dim * ff_mult,
+110-            inner_dim,
+111-        )
+112-
+113-    def forward(
+114-        self,
+115-        query_hidden_states: torch.Tensor,
+116-        context_hidden_states: torch.Tensor,
+117-        *,
+118:        query_viewmats: torch.Tensor,
+119:        query_intrinsics: torch.Tensor,
+120:        source_viewmats: torch.Tensor,
+121:        source_intrinsics: torch.Tensor,
+122-        patch_width: int,
+123-        patch_height: int,
+124:        geometry_key_start: int,
+125-        context_attention_mask: Optional[torch.Tensor] = None,
+126-    ) -> torch.Tensor:
+127-        residual = query_hidden_states
+128-
+129-        query_hidden_states = self.norm_q(query_hidden_states)
+130-        context_hidden_states = self.norm_context(context_hidden_states)
+131-
+132-        q = self.q_proj(query_hidden_states)
+133-        k = self.k_proj(context_hidden_states)
+134-        v = self.v_proj(context_hidden_states)
+135-
+136-        batch_size, query_length, _ = q.shape
+137-        context_length = k.shape[1]
+138-
+139-        q = q.view(
+140-            batch_size,
+141-            query_length,
+142-            self.num_attention_heads,
+143-            self.attention_head_dim,
+144-        ).transpose(1, 2)
+145-        k = k.view(
+146-            batch_size,
+147-            context_length,
+148-            self.num_attention_heads,
+149-            self.attention_head_dim,
+150-        ).transpose(1, 2)
+151-        v = v.view(
+152-            batch_size,
+153-            context_length,
+154-            self.num_attention_heads,
+155-            self.attention_head_dim,
+156-        ).transpose(1, 2)
+157-
+158-        if self.qk_norm_q is not None:
+159-            q = self.qk_norm_q(q)
+160-        if self.qk_norm_k is not None:
+161-            k = self.qk_norm_k(k)
+162-
+163-        attention_mask = None
+164-        if context_attention_mask is not None:
+165-            if context_attention_mask.shape != (
+166-                batch_size,
+167-                context_length,
+168-            ):
+169-                raise ValueError(
+170-                    "context_attention_mask should be [N,K], "
+171-                    f"but got {tuple(context_attention_mask.shape)} "
+172-                    f"for N={batch_size}, K={context_length}."
+173-                )
+174-            attention_mask = context_attention_mask.to(
+175-                device=q.device,
+176-                dtype=torch.bool,
+177-            )[:, None, None, :].expand(
+178-                batch_size,
+179-                1,
+180-                query_length,
+181-                context_length,
+182-            )
+183-
+184-        attention_output = self.urope_attention(
+185-            q,
+186-            k,
+187-            v,
+188:            query_viewmats=query_viewmats,
+189:            query_intrinsics=query_intrinsics,
+190:            source_viewmats=source_viewmats,
+191:            source_intrinsics=source_intrinsics,
+192-            patch_width=patch_width,
+193-            patch_height=patch_height,
+194:            geometry_key_start=geometry_key_start,
+195-            attention_mask=attention_mask,
+196-            dropout_p=self.dropout if self.training else 0.0,
+197-            is_causal=False,
+198-        )
+199-
+200-        attention_output = attention_output.transpose(
+201-            1,
+202-            2,
+203-        ).contiguous().view(
+204-            batch_size,
+205-            query_length,
+206-            self.inner_attention_dim,
+207-        )
+208-
+209-        hidden_states = residual + self.out_proj(attention_output)
+210-        hidden_states = hidden_states + self.ff_out(
+211-            self.ff_act(
+212-                self.ff_in(
+213-                    self.norm_ff(hidden_states)
+214-                )
+215-            )
+216-        )
+217-        return hidden_states
+218-
+219-
+220-class DiTCrossviewTemporalConditionModel(TVModelBase):
+221-    """
+222-    OpenDWM DiT with URoPE directly inside TV attention.
+223-
+224-    This is NOT:
+225-        cross-view URoPE attention -> TV attention
+226-
+227-    It is one joint attention:
+228-        TV selects the local temporal-view context;
+229-        URoPE provides camera geometry inside that same attention;
+230-        the original TV time embedding provides temporal position.
+231-
+232-    Independent cross-view attention is disabled, so Camera SlotID /
+233-    view_pos_embeds are not used.
+234-    """
+235-
+236-    @diffusers.configuration_utils.register_to_config
+237-    def __init__(
+238-        self,
+239-        patch_size: int = 2,
+240-        num_layers: int = 18,
+241-        attention_head_dim: int = 64,
+242-        num_attention_heads: int = 18,
+243-        projection_class_embeddings_input_dim: int = None,
+244-        condition_image_adapter_config: Optional[dict] = None,
+245-        enable_crossview: bool = False,
+246-        enable_temporal: bool = False,
+247-        enable_tv: bool = True,
+248-        urope_config: Optional[dict] = None,
+249-        crossview_attention_type: str = "full",
+250-        temporal_attention_type: str = None,
+251-        tv_attention_type: str = "full",
+252-        merge_factor: float = 2,
+253-        merge_strategy: str = "learned_with_images",
+254-        crossview_block_layers: Optional[dict] = None,
+--
+633-                )
+634-            )
+635-
+636-            context_slot_valid = (
+637-                source_time_valid[:, :, None]
+638-                & source_view_valid[:, None, :]
+639-            )
+640-            context_attention_mask = (
+641-                context_slot_valid[
+642-                    :,
+643-                    :,
+644-                    :,
+645-                    None,
+646-                ].expand(
+647-                    current_chunk_size,
+648-                    3,
+649-                    3,
+650-                    token_count,
+651-                ).reshape(
+652-                    current_chunk_size,
+653-                    9 * token_count,
+654-                )
+655-            )
+656-
+657-            # Target camera geometry.
+658:            query_viewmats = viewmats[
+659-                target_b,
+660-                target_t,
+661-                target_v,
+662-            ]
+663:            query_intrinsics = intrinsics[
+664-                target_b,
+665-                target_t,
+666-                target_v,
+667-            ]
+668-
+669-            # Current-time-only URoPE geometry.
+670-            # TV content remains 3 time x 3 view = 9 slots.
+671-            # Geometry exists only at target_t for [left,self,right].
+672-            # There is NO geometry reuse onto t-1/t+1.
+673:            source_viewmats = viewmats[
+674-                target_b[:, None],
+675-                target_t[:, None],
+676-                source_view_index,
+677-            ]
+678:            source_intrinsics = intrinsics[
+679-                target_b[:, None],
+680-                target_t[:, None],
+681-                source_view_index,
+682-            ]
+683-
+684:            expected_source_viewmats_shape = (
+685-                current_chunk_size, 3, 4, 4,
+686-            )
+687:            expected_source_intrinsics_shape = (
+688-                current_chunk_size, 3, 3, 3,
+689-            )
+690:            if tuple(source_viewmats.shape) != expected_source_viewmats_shape:
+691-                raise RuntimeError(
+692:                    "Current-time URoPE source_viewmats mismatch: "
+693:                    f"got {tuple(source_viewmats.shape)}, "
+694:                    f"expected {expected_source_viewmats_shape}."
+695-                )
+696:            if tuple(source_intrinsics.shape) != expected_source_intrinsics_shape:
+697-                raise RuntimeError(
+698:                    "Current-time URoPE source_intrinsics mismatch: "
+699:                    f"got {tuple(source_intrinsics.shape)}, "
+700:                    f"expected {expected_source_intrinsics_shape}."
+701-                )
+702-
+703-            tv_chunk = tv_block(
+704-                query_hidden_states,
+705-                context_hidden_states,
+706:                query_viewmats=query_viewmats,
+707:                query_intrinsics=query_intrinsics,
+708:                source_viewmats=source_viewmats,
+709:                source_intrinsics=source_intrinsics,
+710-                patch_width=width,
+711-                patch_height=height,
+712-                # Flatten order is time-major:
+713-                # [t-1:L/S/R][t:L/S/R][t+1:L/S/R].
+714:                geometry_key_start=3 * token_count,
+715-                context_attention_mask=(
+716-                    context_attention_mask
+717-                ),
+718-            )
+719-
+720-            if tv_chunk.shape != query_hidden_states.shape:
+721-                raise RuntimeError(
+722-                    "URoPE-TV output shape mismatch: "
+723-                    f"output={tuple(tv_chunk.shape)}, "
+724-                    f"query={tuple(query_hidden_states.shape)}."
+725-                )
+726-
+727-            output_chunks.append(tv_chunk)
+728-
+729-        tv_hidden_states = torch.cat(
+730-            output_chunks,
+731-            dim=0,
+732-        )
+733-        if tv_hidden_states.shape != hidden_states.shape:
+734-            raise RuntimeError(
+735-                "URoPE-TV final shape mismatch: "
+736-                f"tv={tuple(tv_hidden_states.shape)}, "
+737-                f"hidden={tuple(hidden_states.shape)}."
+738-            )
+739-
+740-        if mixer is None:
+741-            return tv_hidden_states
+742-
+743-        return mixer(
+744-            hidden_states.reshape(
+745-                batch_size,
+746-                sequence_length * view_count,
+747-                token_count,
+748-                channel,
+749-            ),
+750-            tv_hidden_states.reshape(
+751-                batch_size,
+752-                sequence_length * view_count,
+753-                token_count,
+754-                channel,
+755-            ),
+756-            image_only_indicator=disable_tv,
+757-        ).flatten(0, 1)
+
+================================================================
+12. Relevant file list
+================================================================
+src/dwm/datasets/argoverse.py
+src/dwm/datasets/bevs/argoverse.py
+src/dwm/datasets/bevs/nuplan.py
+src/dwm/datasets/bevs/nuscenes.py
+src/dwm/datasets/bevs/waymo.py
+src/dwm/datasets/nuplan.py
+src/dwm/datasets/nuscenes.py
+src/dwm/datasets/track_pv/argoverse.py
+src/dwm/datasets/track_pv/nuplan.py
+src/dwm/datasets/track_pv/nuscenes.py
+src/dwm/datasets/track_pv/waymo.py
+src/dwm/datasets/waymo.py
+src/dwm/models/adapters.py
+src/dwm/models/crossview_temporal.py
+src/dwm/models/lyh/crossview_temporal_dit_urope_tv.py
+src/dwm/models/lyh/crossview_temporal_dit_urope_tv_track.py
+src/dwm/models/lyh/crossview_temporal_dit_urope_tv_tself.py
+src/dwm/models/lyh/crossview_temporal_dit_urope_tv_tself_track.py
+src/dwm/models/lyh/urope_current_time.py
+src/dwm/models/urope/urope.py
+src/dwm/pipelines/lyh/camsim_track_urope_tv.py

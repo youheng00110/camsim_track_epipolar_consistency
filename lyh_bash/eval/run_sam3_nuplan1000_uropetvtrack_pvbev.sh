@@ -1,0 +1,1659 @@
+#!/usr/bin/env bash
+
+# ============================================================
+# 0. Paths
+# ============================================================
+
+ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim
+
+EVAL=$ROOT/lyh_output/eval/nuplanhard1000
+
+UROPE_ROOT=$EVAL/uropetvtrack_merged999
+PVBEV_ROOT=$EVAL/pvbev_merged999
+
+BOX_RAW=$EVAL/uropetvtrack/box
+
+# 真正合并后的原始 Box
+BOX_MERGED=$EVAL/uropetvtrack/box_merged999
+
+# 按目标图像分辨率调整后的 geometry-only Box
+BOX_EVAL=$EVAL/uropetvtrack/box_merged999_eval
+
+SAM_ROOT=$ROOT/sam3-eval/sam3-eval
+
+OUT_ROOT=$EVAL/sam3_uropetvtrack_pvbev_merged999_box
+CFG_ROOT=$OUT_ROOT/configs
+LOG_ROOT=$OUT_ROOT/logs
+RESULT_ROOT=$OUT_ROOT/results
+
+mkdir -p \
+    "$BOX_MERGED" \
+    "$CFG_ROOT" \
+    "$LOG_ROOT" \
+    "$RESULT_ROOT"
+
+
+# ============================================================
+# 1. Environment
+# ============================================================
+
+source /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin/activate
+
+export PATH=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin:$PATH
+export PYTHONUNBUFFERED=1
+export TOKENIZERS_PARALLELISM=false
+export OMP_NUM_THREADS=1
+
+# 单卡默认。
+# 多卡例如：
+# CUDA_VISIBLE_DEVICES=0,1,2,3 NPROC=4 bash ...
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+NPROC="${NPROC:-1}"
+
+cd "$SAM_ROOT"
+
+echo "============================================================"
+echo "ENV"
+echo "============================================================"
+echo "python = $(which python)"
+echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+echo "NPROC=$NPROC"
+
+python - <<'PY'
+import torch
+print("torch =", torch.__version__)
+print("cuda =", torch.cuda.is_available())
+print("visible GPUs =", torch.cuda.device_count())
+for i in range(torch.cuda.device_count()):
+    print(i, torch.cuda.get_device_name(i))
+PY
+
+
+# ============================================================
+# 2. Basic files
+# ============================================================
+
+UROPE_MANIFEST=$UROPE_ROOT/stflow_manifest.jsonl
+PVBEV_MANIFEST=$PVBEV_ROOT/stflow_manifest.jsonl
+
+test -f "$UROPE_MANIFEST"
+test -f "$PVBEV_MANIFEST"
+
+if ! find "$BOX_RAW" \
+    -type f \
+    -name box_manifest.jsonl \
+    -print -quit | grep -q .
+then
+    echo "ERROR: no Box manifests under:"
+    echo "$BOX_RAW"
+    exit 1
+fi
+
+
+# ============================================================
+# 3. Find checkpoint
+# ============================================================
+
+CHECKPOINT=$(find \
+    /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/ckpt \
+    -type f \
+    -name 'sam3.1_multiplex.pt' \
+    -print -quit)
+
+if [[ -z "$CHECKPOINT" ]]; then
+    echo "ERROR: sam3.1_multiplex.pt not found"
+    exit 2
+fi
+
+echo
+echo "[OK] checkpoint:"
+echo "$CHECKPOINT"
+
+
+# ============================================================
+# 4. Merge Box + strict 1000-video alignment check
+# ============================================================
+
+UROPE_MANIFEST="$UROPE_MANIFEST" \
+PVBEV_MANIFEST="$PVBEV_MANIFEST" \
+BOX_RAW="$BOX_RAW" \
+BOX_MERGED="$BOX_MERGED" \
+BOX_EVAL="$BOX_EVAL" \
+SAM_ROOT="$SAM_ROOT" \
+python - <<'PY'
+from __future__ import annotations
+
+import copy
+import json
+import os
+import shutil
+from collections import defaultdict
+from pathlib import Path
+
+from PIL import Image
+
+import sys
+sys.path.insert(0, os.environ["SAM_ROOT"])
+
+from shared_box_projection import video_pose_signature
+
+
+UROPE_MANIFEST = Path(os.environ["UROPE_MANIFEST"])
+PVBEV_MANIFEST = Path(os.environ["PVBEV_MANIFEST"])
+BOX_RAW = Path(os.environ["BOX_RAW"])
+BOX_MERGED = Path(os.environ["BOX_MERGED"])
+BOX_EVAL = Path(os.environ["BOX_EVAL"])
+
+
+def load_jsonl(path):
+    result = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                result.append(json.loads(line))
+    return result
+
+
+def resolve_path(value, manifest):
+    p = Path(str(value))
+    if not p.is_absolute():
+        p = manifest.parent / p
+    return p.resolve()
+
+
+# ============================================================
+# Target manifests
+# ============================================================
+
+urope = load_jsonl(UROPE_MANIFEST)
+pvbev = load_jsonl(PVBEV_MANIFEST)
+
+print()
+print("=" * 90)
+print("TARGET MANIFESTS")
+print("=" * 90)
+
+print("uropetvtrack videos =", len(urope))
+print("pvbev videos        =", len(pvbev))
+
+if len(urope) != 999:
+    raise RuntimeError(
+        f"uropetvtrack expected 999, got {len(urope)}"
+    )
+
+if len(pvbev) != 999:
+    raise RuntimeError(
+        f"pvbev expected 999, got {len(pvbev)}"
+    )
+
+
+urope_by_sig = {
+    video_pose_signature(x): x
+    for x in urope
+}
+
+pvbev_by_sig = {
+    video_pose_signature(x): x
+    for x in pvbev
+}
+
+if len(urope_by_sig) != 999:
+    raise RuntimeError(
+        "uropetvtrack has duplicate pose signatures"
+    )
+
+if len(pvbev_by_sig) != 999:
+    raise RuntimeError(
+        "pvbev has duplicate pose signatures"
+    )
+
+
+urope_sigs = set(urope_by_sig)
+pvbev_sigs = set(pvbev_by_sig)
+
+print("urope signatures =", len(urope_sigs))
+print("pvbev signatures =", len(pvbev_sigs))
+
+print(
+    "urope missing in pvbev =",
+    len(urope_sigs - pvbev_sigs),
+)
+
+print(
+    "pvbev missing in urope =",
+    len(pvbev_sigs - urope_sigs),
+)
+
+if urope_sigs != pvbev_sigs:
+    raise RuntimeError(
+        "The two merged1000 methods are not the "
+        "same 1000 videos."
+    )
+
+
+# ============================================================
+# Protocol inspection
+# ============================================================
+
+def inspect(name, items):
+    frame_counts = set()
+    cameras = set()
+    total = 0
+    refs = 0
+    real = 0
+
+    for video in items:
+        frames = video.get("frames", [])
+        frame_counts.add(len(frames))
+
+        for frame in frames:
+            for view in frame.get("views", []):
+                total += 1
+                cameras.add(str(view.get("camera")))
+
+                if view.get("is_reference_frame", False):
+                    refs += 1
+
+                if view.get("real_image_path"):
+                    real += 1
+
+    eligible = total - refs
+
+    print()
+    print(name)
+    print(" frame counts    =", sorted(frame_counts))
+    print(" cameras         =", sorted(cameras))
+    print(" all views       =", total)
+    print(" reference views =", refs)
+    print(" eligible views  =", eligible)
+    print(" real paths      =", real)
+
+    return cameras, eligible
+
+
+urope_cams, urope_eligible = inspect(
+    "UROPETVTRACK",
+    urope,
+)
+
+pvbev_cams, pvbev_eligible = inspect(
+    "PVBEV",
+    pvbev,
+)
+
+if urope_cams != pvbev_cams:
+    raise RuntimeError(
+        "Camera sets differ between methods"
+    )
+
+if urope_eligible != pvbev_eligible:
+    raise RuntimeError(
+        "Eligible view counts differ"
+    )
+
+
+# ============================================================
+# Check paired real files from urope manifest
+# ============================================================
+
+missing_real = 0
+
+for video in urope:
+    for frame in video["frames"]:
+        for view in frame["views"]:
+            raw = view.get("real_image_path")
+
+            if not raw:
+                missing_real += 1
+                continue
+
+            p = resolve_path(
+                raw,
+                UROPE_MANIFEST,
+            )
+
+            if not p.is_file():
+                missing_real += 1
+
+print()
+print("missing paired-real images =", missing_real)
+
+if missing_real:
+    raise RuntimeError(
+        "Cannot use uropetvtrack manifest as paired-real source"
+    )
+
+
+# ============================================================
+# Load all Box rank manifests
+# ============================================================
+
+box_manifests = sorted(
+    BOX_RAW.glob(
+        "rank_*/box_manifest.jsonl"
+    )
+)
+
+print()
+print("=" * 90)
+print("SOURCE BOX")
+print("=" * 90)
+
+print("manifests =", len(box_manifests))
+
+for p in box_manifests:
+    print(" ", p)
+
+if not box_manifests:
+    raise RuntimeError("No Box manifests")
+
+
+box_by_sig = {}
+box_sources = {}
+
+total_box_records = 0
+duplicate = 0
+
+for manifest in box_manifests:
+
+    items = load_jsonl(manifest)
+
+    print(
+        manifest.parent.name,
+        "records =",
+        len(items),
+    )
+
+    for item in items:
+
+        total_box_records += 1
+
+        sig = video_pose_signature(item)
+
+        if sig in box_by_sig:
+
+            duplicate += 1
+
+            # If duplicate pose exists, require geometrically
+            # identical record rather than silently choosing.
+            old = json.dumps(
+                box_by_sig[sig],
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+
+            new = json.dumps(
+                item,
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+
+            if old != new:
+                raise RuntimeError(
+                    f"Conflicting duplicated Box pose: {sig}"
+                )
+
+            continue
+
+        box_by_sig[sig] = item
+        box_sources[sig] = manifest
+
+
+box_sigs = set(box_by_sig)
+
+print()
+print("total Box records     =", total_box_records)
+print("unique Box signatures =", len(box_sigs))
+print("duplicates            =", duplicate)
+
+
+# ============================================================
+# Strict coverage check
+# ============================================================
+
+missing = urope_sigs - box_sigs
+extra = box_sigs - urope_sigs
+
+print()
+print("=" * 90)
+print("BOX COVERAGE CHECK")
+print("=" * 90)
+
+print("target videos      =", len(urope_sigs))
+print("matched Box videos =", len(urope_sigs & box_sigs))
+print("missing Box videos =", len(missing))
+print("extra Box videos   =", len(extra))
+
+if missing:
+
+    print()
+    print("First missing:")
+    for x in list(missing)[:20]:
+        print(x)
+
+    raise RuntimeError(
+        "BOX COVERAGE FAILED. "
+        "Do not run SAM until all 999 target videos "
+        "have Box GT."
+    )
+
+
+# ============================================================
+# Check every target frame/camera exists in Box
+# ============================================================
+
+missing_views = []
+
+for sig, target in urope_by_sig.items():
+
+    box = box_by_sig[sig]
+
+    box_frames = {
+        int(
+            fr.get(
+                "frame_index",
+                i,
+            )
+        ): fr
+        for i, fr in enumerate(
+            box.get("frames", [])
+        )
+    }
+
+    for i, frame in enumerate(target["frames"]):
+
+        ti = int(
+            frame.get(
+                "frame_index",
+                i,
+            )
+        )
+
+        box_frame = box_frames.get(ti)
+
+        if box_frame is None:
+            missing_views.append(
+                (sig, ti, "FRAME")
+            )
+            continue
+
+        bcams = {
+            str(v.get("camera"))
+            for v in box_frame.get("views", [])
+        }
+
+        tcams = {
+            str(v.get("camera"))
+            for v in frame.get("views", [])
+        }
+
+        for cam in tcams:
+            if cam not in bcams:
+                missing_views.append(
+                    (sig, ti, cam)
+                )
+
+
+print("missing Box frame/camera views =", len(missing_views))
+
+if missing_views:
+    print(missing_views[:20])
+    raise RuntimeError(
+        "Box video matched but frame/camera coverage incomplete"
+    )
+
+
+# ============================================================
+# Merge exact target 1000 Box videos into one manifest
+#
+# Order = target uropetvtrack merged1000 order.
+# ============================================================
+
+if BOX_MERGED.exists():
+    shutil.rmtree(BOX_MERGED)
+
+BOX_MERGED.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+merged_manifest = (
+    BOX_MERGED
+    / "box_manifest.jsonl"
+)
+
+with merged_manifest.open(
+    "w",
+    encoding="utf-8",
+) as f:
+
+    for target in urope:
+
+        sig = video_pose_signature(target)
+
+        f.write(
+            json.dumps(
+                box_by_sig[sig],
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+
+check = load_jsonl(merged_manifest)
+
+check_sigs = {
+    video_pose_signature(x)
+    for x in check
+}
+
+print()
+print("=" * 90)
+print("MERGED BOX")
+print("=" * 90)
+
+print("records =", len(check))
+print("unique  =", len(check_sigs))
+print("match target =", check_sigs == urope_sigs)
+
+if len(check) != 999:
+    raise RuntimeError(
+        f"Merged Box should contain 999 records, got {len(check)}"
+    )
+
+if check_sigs != urope_sigs:
+    raise RuntimeError(
+        "Merged Box signatures do not equal target"
+    )
+
+
+# ============================================================
+# Resolve target image size per camera
+# ============================================================
+
+target_sizes = defaultdict(set)
+
+for video in urope:
+    for frame in video["frames"]:
+        for view in frame["views"]:
+
+            cam = str(view["camera"])
+
+            size = view.get("image_size")
+
+            if (
+                isinstance(size, (list, tuple))
+                and len(size) >= 2
+                and int(size[0]) > 0
+                and int(size[1]) > 0
+            ):
+                target_sizes[cam].add(
+                    (
+                        int(size[0]),
+                        int(size[1]),
+                    )
+                )
+            else:
+                p = resolve_path(
+                    view["image_path"],
+                    UROPE_MANIFEST,
+                )
+
+                with Image.open(p) as im:
+                    target_sizes[cam].add(
+                        im.size
+                    )
+
+
+for cam, sizes in target_sizes.items():
+    if len(sizes) != 1:
+        raise RuntimeError(
+            f"{cam}: multiple target sizes {sizes}"
+        )
+
+
+target_sizes = {
+    cam: next(iter(sizes))
+    for cam, sizes in target_sizes.items()
+}
+
+print()
+print("target sizes:")
+for cam, size in sorted(target_sizes.items()):
+    print(cam, size)
+
+
+# ============================================================
+# Prepare geometry-only projection manifest at target resolution
+# ============================================================
+
+if BOX_EVAL.exists():
+    shutil.rmtree(BOX_EVAL)
+
+BOX_EVAL.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+eval_manifest = (
+    BOX_EVAL
+    / "box_manifest.jsonl"
+)
+
+scaled = 0
+already = 0
+view_count = 0
+
+
+with eval_manifest.open(
+    "w",
+    encoding="utf-8",
+) as writer:
+
+    for original in check:
+
+        video = copy.deepcopy(original)
+
+        for frame in video.get("frames", []):
+
+            for view in frame.get("views", []):
+
+                cam = str(view.get("camera"))
+
+                if cam not in target_sizes:
+                    continue
+
+                tw, th = target_sizes[cam]
+
+                old_size = view.get("image_size")
+
+                if (
+                    not isinstance(old_size, (list, tuple))
+                    or len(old_size) < 2
+                ):
+                    raise RuntimeError(
+                        f"Box image_size missing: "
+                        f"{video.get('video_id')} {cam}"
+                    )
+
+                ow = int(old_size[0])
+                oh = int(old_size[1])
+
+                if ow <= 0 or oh <= 0:
+                    raise RuntimeError(
+                        f"Invalid Box image size {(ow, oh)}"
+                    )
+
+
+                if (ow, oh) != (tw, th):
+
+                    sx = tw / float(ow)
+                    sy = th / float(oh)
+
+                    P = copy.deepcopy(
+                        view.get("lidar_to_image")
+                    )
+
+                    if P is None:
+                        raise RuntimeError(
+                            "Missing lidar_to_image"
+                        )
+
+                    P[0] = [
+                        float(x) * sx
+                        for x in P[0]
+                    ]
+
+                    P[1] = [
+                        float(x) * sy
+                        for x in P[1]
+                    ]
+
+                    view[
+                        "lidar_to_image"
+                    ] = P
+
+
+                    if view.get("K") is not None:
+
+                        K = copy.deepcopy(
+                            view["K"]
+                        )
+
+                        K[0] = [
+                            float(x) * sx
+                            for x in K[0]
+                        ]
+
+                        K[1] = [
+                            float(x) * sy
+                            for x in K[1]
+                        ]
+
+                        view["K"] = K
+
+
+                    scaled += 1
+
+                else:
+                    already += 1
+
+
+                view["image_size"] = [
+                    tw,
+                    th,
+                ]
+
+
+                # geometry-only
+                view.pop(
+                    "image_path",
+                    None,
+                )
+
+                view.pop(
+                    "real_image_path",
+                    None,
+                )
+
+                view.pop(
+                    "valid_mask_path",
+                    None,
+                )
+
+                view_count += 1
+
+
+        writer.write(
+            json.dumps(
+                video,
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+
+print()
+print("=" * 90)
+print("BOX EVAL READY")
+print("=" * 90)
+
+print("videos         =", len(check))
+print("views          =", view_count)
+print("scaled views   =", scaled)
+print("already target =", already)
+print("root           =", BOX_EVAL)
+
+print()
+print("BOX MERGE + ALIGNMENT PASS")
+
+# Store expected eligible count.
+expected_file = BOX_EVAL / "expected_views.txt"
+expected_file.write_text(
+    str(urope_eligible),
+    encoding="utf-8",
+)
+
+print("expected eligible SAM views =", urope_eligible)
+PY
+
+
+# ============================================================
+# 5. Read expected number
+# ============================================================
+
+EXPECTED=$(cat "$BOX_EVAL/expected_views.txt")
+
+echo
+echo "Expected views per source = $EXPECTED"
+
+# For standard 1000×16×8 NuPlan this should be 127872.
+if [[ "$EXPECTED" != "127872" ]]; then
+    echo
+    echo "[WARNING] expected count is not 127872."
+    echo "The script will use the manifest-derived count: $EXPECTED"
+fi
+
+
+# ============================================================
+# 6. Generate configs
+# ============================================================
+
+ROOT="$ROOT" \
+UROPE_ROOT="$UROPE_ROOT" \
+PVBEV_ROOT="$PVBEV_ROOT" \
+BOX_EVAL="$BOX_EVAL" \
+CHECKPOINT="$CHECKPOINT" \
+CFG_ROOT="$CFG_ROOT" \
+RESULT_ROOT="$RESULT_ROOT" \
+python - <<'PY'
+import copy
+import os
+from pathlib import Path
+
+import yaml
+
+
+ROOT = Path(os.environ["ROOT"])
+UROPE = Path(os.environ["UROPE_ROOT"])
+PVBEV = Path(os.environ["PVBEV_ROOT"])
+BOX = Path(os.environ["BOX_EVAL"])
+CFG = Path(os.environ["CFG_ROOT"])
+RESULT = Path(os.environ["RESULT_ROOT"])
+
+CHECKPOINT = os.environ["CHECKPOINT"]
+
+
+BASE = {
+
+    "paths": {
+        "shared_box_root": str(BOX),
+
+        "sam3_repo": str(
+            ROOT
+            / "sam3-eval"
+            / "sam3-eval"
+            / "sam3"
+        ),
+
+        "checkpoint": CHECKPOINT,
+    },
+
+
+    "preview": {
+        "manifest_glob":
+            "stflow_manifest.jsonl",
+
+        "skip_reference_frames":
+            True,
+
+        "strict_paths":
+            True,
+
+        "include_methods":
+            [],
+
+        "exclude_methods":
+            [],
+    },
+
+
+    "shared_box": {
+        "manifest_glob":
+            "**/box_manifest.jsonl",
+
+        "strict_paths":
+            True,
+
+        "strict_match":
+            True,
+    },
+
+
+    "sources": {},
+
+
+    "model": {
+        "version": "sam3.1",
+
+        "prompts": [
+            "car",
+            "truck",
+            "bus",
+        ],
+
+        "confidence_threshold": 0.25,
+
+        "batch_size": 1,
+
+        "loader_workers": 4,
+
+        "precision": "bfloat16",
+
+        "input_resolution": 1008,
+
+        "save_masks": True,
+
+        "mask_resolution": 256,
+
+        "mask_threshold": 0.5,
+
+        "max_detections_per_prompt": 100,
+
+        "max_detections_per_image": 150,
+
+        "nms_iou_threshold": 0.70,
+
+        "checkpoint_minimum_coverage": 0.95,
+
+        "checkpoint_mmap": True,
+    },
+
+
+    "annotation": {
+        "classes": [
+            "CAR",
+            "TRUCK",
+            "BUS",
+        ],
+
+        "near_plane": 0.10,
+
+        "min_projected_height_px": 8.0,
+
+        "min_projected_area_px": 64.0,
+
+        "min_in_frame_fraction": 0.10,
+    },
+
+
+    "visibility": {
+        "disable_gt_occlusion": True,
+
+        "min_gt_visible_ratio": 0.0,
+
+        "min_gt_visible_connected_pixels": 4,
+    },
+
+
+    "matching": {
+        "min_mask_iou": 0.05,
+
+        "max_center_error_norm": 0.80,
+
+        "max_scale_error_log": 1.20,
+
+        "max_cost": 1.10,
+
+        "cost_mask_iou": 0.65,
+
+        "cost_center": 0.20,
+
+        "cost_bottom": 0.05,
+
+        "cost_scale": 0.10,
+
+        "allow_bbox_mask_fallback": False,
+
+        "min_sam_connected_pixels": 0,
+    },
+
+
+    "visualization": {
+        "enabled": True,
+
+        "max_frames_per_source": 16,
+
+        "image_quality": 92,
+
+        "mask_alpha": 0.25,
+
+        "draw_cuboid": True,
+
+        "draw_detection_box": True,
+
+        "draw_filtered_small_sam": True,
+    },
+
+
+    "runtime": {
+        "seed": 3407,
+
+        "backend": "sam3.1",
+
+        "limit_frames": 0,
+
+        "overwrite": True,
+    },
+}
+
+
+JOBS = {
+
+    "pairedreal": {
+        "preview": UROPE,
+
+        "output": RESULT / "pairedreal",
+
+        "sources": {
+            "real": {
+                "type": "preview_real",
+                "group_by_manifest": False,
+            }
+        },
+    },
+
+
+    "uropetvtrack": {
+        "preview": UROPE,
+
+        "output": RESULT / "uropetvtrack",
+
+        "sources": {
+            "generated": {
+                "type": "preview_generated",
+                "group_by_manifest": False,
+            }
+        },
+    },
+
+
+    "pvbev": {
+        "preview": PVBEV,
+
+        "output": RESULT / "pvbev",
+
+        "sources": {
+            "generated": {
+                "type": "preview_generated",
+                "group_by_manifest": False,
+            }
+        },
+    },
+}
+
+
+for name, job in JOBS.items():
+
+    cfg = copy.deepcopy(BASE)
+
+    cfg["paths"][
+        "preview_root"
+    ] = str(job["preview"])
+
+    cfg["paths"][
+        "output_dir"
+    ] = str(job["output"])
+
+    cfg["sources"] = job["sources"]
+
+    path = CFG / f"{name}.yaml"
+
+    with path.open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+
+        yaml.safe_dump(
+            cfg,
+            f,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+
+    print(name, "->", path)
+PY
+
+
+# ============================================================
+# 7. Scan all three before inference
+# ============================================================
+
+scan_one () {
+
+    NAME="$1"
+    CFG="$CFG_ROOT/$NAME.yaml"
+    LOG="$LOG_ROOT/${NAME}_scan.log"
+
+    echo
+    echo "============================================================"
+    echo "SCAN $NAME"
+    echo "============================================================"
+
+    python -u run_eval.py \
+        --config "$CFG" \
+        --scan-only \
+        2>&1 | tee "$LOG"
+
+
+    if ! grep -Eq \
+        "\"frames\"[[:space:]]*:[[:space:]]*$EXPECTED" \
+        "$LOG"
+    then
+        echo "ERROR: $NAME frames != $EXPECTED"
+        exit 20
+    fi
+
+
+    if ! grep -Eq \
+        "\"shared_box_matched\"[[:space:]]*:[[:space:]]*$EXPECTED" \
+        "$LOG"
+    then
+        echo "ERROR: $NAME Box matched != $EXPECTED"
+        exit 21
+    fi
+
+
+    if ! grep -Eq \
+        '"shared_box_missing"[[:space:]]*:[[:space:]]*0' \
+        "$LOG"
+    then
+        echo "ERROR: $NAME missing Box GT"
+        exit 22
+    fi
+
+
+    echo "[SCAN PASS] $NAME"
+}
+
+
+scan_one pairedreal
+scan_one uropetvtrack
+scan_one pvbev
+
+
+# ============================================================
+# 8. Run
+#
+# Existing summary -> skip
+# Existing partial records + --resume support -> resume
+# Otherwise start clean.
+# ============================================================
+
+run_one () {
+
+    NAME="$1"
+
+    CFG="$CFG_ROOT/$NAME.yaml"
+    OUT="$RESULT_ROOT/$NAME"
+    LOG="$LOG_ROOT/$NAME.log"
+
+    echo
+    echo "============================================================"
+    echo "RUN $NAME"
+    echo "============================================================"
+
+
+    if [[ -f "$OUT/summary.json" ]]; then
+        echo "[SKIP] summary.json already exists"
+        return
+    fi
+
+
+    EXTRA_ARGS=()
+
+    if [[ -f "$OUT/records.rank000.jsonl" ]] \
+       && grep -q -- '--resume' "$SAM_ROOT/run_eval.py"
+    then
+
+        echo "[RESUME] existing records found"
+
+        wc -l \
+            "$OUT/records.rank000.jsonl"
+
+        EXTRA_ARGS+=(--resume)
+
+    elif [[ -d "$OUT" ]]; then
+
+        BACKUP="${OUT}.bak_$(date +%Y%m%d_%H%M%S)"
+
+        echo "old incomplete output -> $BACKUP"
+
+        mv "$OUT" "$BACKUP"
+    fi
+
+
+    if [[ "$NPROC" -gt 1 ]]; then
+
+        python -m torch.distributed.run \
+            --standalone \
+            --nproc_per_node="$NPROC" \
+            run_eval.py \
+            --config "$CFG" \
+            "${EXTRA_ARGS[@]}" \
+            2>&1 | tee -a "$LOG"
+
+    else
+
+        python -u run_eval.py \
+            --config "$CFG" \
+            "${EXTRA_ARGS[@]}" \
+            2>&1 | tee -a "$LOG"
+    fi
+
+
+    if [[ ! -f "$OUT/summary.json" ]]; then
+        echo "ERROR: $NAME did not create summary.json"
+        exit 30
+    fi
+
+    echo "[DONE] $NAME"
+}
+
+
+run_one pairedreal
+run_one uropetvtrack
+run_one pvbev
+
+
+# ============================================================
+# 9. GT-centric + RC metrics
+# ============================================================
+
+RESULT_ROOT="$RESULT_ROOT" \
+python - <<'PY'
+import csv
+import json
+import os
+from pathlib import Path
+
+
+ROOT = Path(os.environ["RESULT_ROOT"])
+
+REAL = ROOT / "pairedreal"
+
+METHODS = {
+    "uropetvtrack":
+        ROOT / "uropetvtrack",
+
+    "pvbev":
+        ROOT / "pvbev",
+}
+
+
+def iter_records(root):
+
+    files = sorted(
+        root.glob(
+            "records.rank*.jsonl"
+        )
+    )
+
+    if not files:
+        raise FileNotFoundError(
+            f"No records under {root}"
+        )
+
+    for path in files:
+
+        with path.open(
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            for line in f:
+
+                if line.strip():
+                    yield json.loads(line)
+
+
+def key(r):
+
+    return (
+        str(r["box_manifest_path"]),
+        str(r["box_video_id"]),
+        int(r["time_index"]),
+        str(r["camera_name"]),
+    )
+
+
+def matches(r):
+
+    return {
+        str(m["gt_id"]):
+            float(m["mask_iou"])
+
+        for m in
+        r["matching"]["matches"]
+    }
+
+
+# ------------------------------------------------------------
+# paired real
+# ------------------------------------------------------------
+
+real_index = {}
+
+real_views = 0
+real_gt = 0
+real_match = 0
+real_iou = 0.0
+
+
+for r in iter_records(REAL):
+
+    k = key(r)
+
+    if k in real_index:
+        raise RuntimeError(
+            f"Duplicate real key {k}"
+        )
+
+    m = matches(r)
+
+    real_index[k] = m
+
+    real_views += 1
+    real_gt += int(r["gt_count"])
+    real_match += len(m)
+    real_iou += sum(m.values())
+
+
+real_recall = (
+    real_match / real_gt
+    if real_gt else 0.0
+)
+
+real_matched_iou = (
+    real_iou / real_match
+    if real_match else 0.0
+)
+
+real_coverage = (
+    real_iou / real_gt
+    if real_gt else 0.0
+)
+
+
+rows = [{
+    "method": "pairedreal",
+
+    "views": real_views,
+
+    "gt": real_gt,
+
+    "matched": real_match,
+
+    "gt_recall": real_recall,
+
+    "matched_mask_iou":
+        real_matched_iou,
+
+    "coverage_iou":
+        real_coverage,
+
+    "rc_gt":
+        real_match,
+
+    "rc_match":
+        real_match,
+
+    "rc_recall":
+        1.0,
+
+    "rc_matched_iou":
+        real_matched_iou,
+
+    "rc_coverage_iou":
+        real_matched_iou,
+
+    "missing_real_views":
+        0,
+}]
+
+
+print()
+print("=" * 90)
+print("PAIRED REAL")
+print("=" * 90)
+
+print("views           =", real_views)
+print("GT              =", real_gt)
+print("matched         =", real_match)
+print(f"GT Recall       = {real_recall:.6f}")
+print(f"Matched IoU     = {real_matched_iou:.6f}")
+print(f"Coverage-IoU    = {real_coverage:.6f}")
+
+
+# ------------------------------------------------------------
+# generated
+# ------------------------------------------------------------
+
+for name, path in METHODS.items():
+
+    views = 0
+
+    gt = 0
+    matched = 0
+    iou = 0.0
+
+    rc_gt = 0
+    rc_match = 0
+    rc_iou = 0.0
+
+    missing_real = 0
+    seen = set()
+
+
+    for r in iter_records(path):
+
+        k = key(r)
+
+        if k in seen:
+            raise RuntimeError(
+                f"{name}: duplicate view {k}"
+            )
+
+        seen.add(k)
+
+        m = matches(r)
+
+        views += 1
+        gt += int(r["gt_count"])
+        matched += len(m)
+        iou += sum(m.values())
+
+
+        rm = real_index.get(k)
+
+        if rm is None:
+            missing_real += 1
+            continue
+
+
+        real_ids = set(rm)
+
+        rc_gt += len(real_ids)
+
+        common = (
+            real_ids
+            & set(m)
+        )
+
+        rc_match += len(common)
+
+        rc_iou += sum(
+            m[x]
+            for x in common
+        )
+
+
+    recall = (
+        matched / gt
+        if gt else 0.0
+    )
+
+    matched_iou = (
+        iou / matched
+        if matched else 0.0
+    )
+
+    coverage = (
+        iou / gt
+        if gt else 0.0
+    )
+
+    rc_recall = (
+        rc_match / rc_gt
+        if rc_gt else 0.0
+    )
+
+    rc_matched_iou = (
+        rc_iou / rc_match
+        if rc_match else 0.0
+    )
+
+    rc_coverage = (
+        rc_iou / rc_gt
+        if rc_gt else 0.0
+    )
+
+
+    if missing_real:
+        raise RuntimeError(
+            f"{name}: missing real views = {missing_real}"
+        )
+
+
+    rows.append({
+        "method":
+            name,
+
+        "views":
+            views,
+
+        "gt":
+            gt,
+
+        "matched":
+            matched,
+
+        "gt_recall":
+            recall,
+
+        "matched_mask_iou":
+            matched_iou,
+
+        "coverage_iou":
+            coverage,
+
+        "rc_gt":
+            rc_gt,
+
+        "rc_match":
+            rc_match,
+
+        "rc_recall":
+            rc_recall,
+
+        "rc_matched_iou":
+            rc_matched_iou,
+
+        "rc_coverage_iou":
+            rc_coverage,
+
+        "missing_real_views":
+            missing_real,
+    })
+
+
+    print()
+    print("=" * 90)
+    print(name)
+    print("=" * 90)
+
+    print("views           =", views)
+    print("GT              =", gt)
+    print("matched         =", matched)
+
+    print(f"GT Recall       = {recall:.6f}")
+    print(f"Matched IoU     = {matched_iou:.6f}")
+    print(f"Coverage-IoU    = {coverage:.6f}")
+
+    print("RC GT           =", rc_gt)
+    print("RC matched      =", rc_match)
+
+    print(f"RC-Recall       = {rc_recall:.6f}")
+    print(f"RC-Matched-IoU  = {rc_matched_iou:.6f}")
+    print(f"RC-Coverage-IoU = {rc_coverage:.6f}")
+
+
+# ============================================================
+# Save CSV + JSON
+# ============================================================
+
+csv_path = (
+    ROOT
+    / "uropetvtrack_pvbev_box_metrics.csv"
+)
+
+json_path = (
+    ROOT
+    / "uropetvtrack_pvbev_box_metrics.json"
+)
+
+
+fields = [
+    "method",
+    "views",
+    "gt",
+    "matched",
+    "gt_recall",
+    "matched_mask_iou",
+    "coverage_iou",
+    "rc_gt",
+    "rc_match",
+    "rc_recall",
+    "rc_matched_iou",
+    "rc_coverage_iou",
+    "missing_real_views",
+]
+
+
+with csv_path.open(
+    "w",
+    encoding="utf-8",
+    newline="",
+) as f:
+
+    writer = csv.DictWriter(
+        f,
+        fieldnames=fields,
+    )
+
+    writer.writeheader()
+    writer.writerows(rows)
+
+
+with json_path.open(
+    "w",
+    encoding="utf-8",
+) as f:
+
+    json.dump(
+        rows,
+        f,
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+print()
+print("=" * 76)
+print("MAIN TABLE")
+print("=" * 76)
+
+print(
+    f"{'Method':<20}"
+    f"{'Coverage-IoU':>16}"
+    f"{'RC-Recall':>14}"
+    f"{'RC-Cov-IoU':>16}"
+)
+
+print("-" * 66)
+
+for r in rows:
+
+    print(
+        f"{r['method']:<20}"
+        f"{r['coverage_iou']:>16.4f}"
+        f"{r['rc_recall']:>14.4f}"
+        f"{r['rc_coverage_iou']:>16.4f}"
+    )
+
+
+print()
+print("Saved:")
+print(csv_path)
+print(json_path)
+PY
+
+
+echo
+echo "============================================================"
+echo "ALL DONE"
+echo "============================================================"
+
+echo "Results:"
+echo "$RESULT_ROOT"
+

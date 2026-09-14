@@ -1,0 +1,41 @@
+URoPE current-time z diagnostic
+======================================================================================
+batches=2
+image=288x512, URoPE patch=18x32
+depths=2.0m, 5.0m, 8.0m, 11.0m, 14.0m, 17.0m
+left slot replaced by self=50.000%
+right slot replaced by self=50.000%
+fps seen=[[6.0], [2.0]]
+
+   slot   depth     neg_z%  posFOV/all%   posFOV|z+%   negAbsFOV%
+--------------------------------------------------------------------------------------
+   left     2.0     16.234       51.351       61.304        0.000
+   left     5.0     14.319       53.799       62.790        0.000
+   left     8.0     13.771       54.214       62.872        0.000
+   left    11.0     13.686       54.539       63.187        0.000
+   left    14.0     13.578       54.842       63.459        0.000
+   left    17.0     13.462       54.922       63.466        0.000
+
+   self     2.0      0.000      100.000      100.000          nan
+   self     5.0      0.000      100.000      100.000          nan
+   self     8.0      0.000      100.000      100.000          nan
+   self    11.0      0.000      100.000      100.000          nan
+   self    14.0      0.000      100.000      100.000          nan
+   self    17.0      0.000      100.000      100.000          nan
+
+  right     2.0     16.045       51.434       61.264        3.706
+  right     5.0     14.300       53.800       62.777        4.617
+  right     8.0     13.771       54.185       62.838        5.102
+  right    11.0     13.609       54.475       63.056        4.887
+  right    14.0     13.537       54.768       63.342        4.677
+  right    17.0     13.474       54.912       63.462        4.651
+
+Self-camera sanity
+mean max(|du|,|dv|)=0.00003878 patch pixels
+max  max(|du|,|dv|)=0.00041008 patch pixels
+
+Interpretation:
+- self neg_z should be ~0%, self reprojection error should be ~0.
+- left/right neg_z only a few %: abs(z) probably minor.
+- left/right neg_z tens of %: behind-camera geometry is substantial.
+- high negAbsFOV% is strongest warning: abs(z) folds behind-camera points into plausible in-FOV positions.

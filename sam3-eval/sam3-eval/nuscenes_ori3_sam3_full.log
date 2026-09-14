@@ -1,0 +1,80 @@
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 324, in <module>
+[rank1]:     main()
+[rank1]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 138, in main
+[rank1]:     rank, world_size, _, device = initialize_runtime()
+[rank1]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 50, in initialize_runtime
+[rank1]:     torch.cuda.set_device(local_rank)
+[rank1]:   File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/cuda/__init__.py", line 478, in set_device
+[rank1]:     torch._C._cuda_setDevice(device)
+[rank1]: RuntimeError: CUDA error: invalid device ordinal
+[rank1]: CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[rank1]: For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[rank1]: Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+[PREVIEW_SCAN_START] root=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output/eval/nuscenesablation/nuscenesablationori3_merged500 glob=stflow_manifest.jsonl
+[PREVIEW_MANIFESTS_FOUND] count=1
+[PREVIEW_SCAN_MANIFEST] 1/1 method=nuscenesablationori3_merged500
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 324, in <module>
+[rank3]:     main()
+[rank3]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 138, in main
+[rank3]:     rank, world_size, _, device = initialize_runtime()
+[rank3]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 50, in initialize_runtime
+[rank3]:     torch.cuda.set_device(local_rank)
+[rank3]:   File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/cuda/__init__.py", line 478, in set_device
+[rank3]:     torch._C._cuda_setDevice(device)
+[rank3]: RuntimeError: CUDA error: invalid device ordinal
+[rank3]: CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[rank3]: For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[rank3]: Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 324, in <module>
+[rank2]:     main()
+[rank2]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 138, in main
+[rank2]:     rank, world_size, _, device = initialize_runtime()
+[rank2]:   File "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/sam3-eval/sam3-eval/run_eval.py", line 50, in initialize_runtime
+[rank2]:     torch.cuda.set_device(local_rank)
+[rank2]:   File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/cuda/__init__.py", line 478, in set_device
+[rank2]:     torch._C._cuda_setDevice(device)
+[rank2]: RuntimeError: CUDA error: invalid device ordinal
+[rank2]: CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+[rank2]: For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+[rank2]: Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+[rank3]:[W808 18:33:09.167852539 ProcessGroupNCCL.cpp:1250] Warning: WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. On normal program exit, the application should call destroy_process_group to ensure that any pending NCCL operations have finished in this process. In rare cases this process can exit before this point and block the progress of another member of the process group. This constraint has always been present,  but this warning has only been added since PyTorch 2.4 (function operator())
+[rank2]:[W808 18:33:09.171584325 ProcessGroupNCCL.cpp:1250] Warning: WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. On normal program exit, the application should call destroy_process_group to ensure that any pending NCCL operations have finished in this process. In rare cases this process can exit before this point and block the progress of another member of the process group. This constraint has always been present,  but this warning has only been added since PyTorch 2.4 (function operator())
+[rank1]:[W808 18:33:09.228156332 ProcessGroupNCCL.cpp:1250] Warning: WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. On normal program exit, the application should call destroy_process_group to ensure that any pending NCCL operations have finished in this process. In rare cases this process can exit before this point and block the progress of another member of the process group. This constraint has always been present,  but this warning has only been added since PyTorch 2.4 (function operator())
+W0808 18:33:10.091000 58040 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 58208 closing signal SIGTERM
+W0808 18:33:10.092000 58040 site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 58209 closing signal SIGTERM
+E0808 18:33:10.206000 58040 site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 3 (pid: 58211) of binary: /inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/bin/python3.10
+Traceback (most recent call last):
+  File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/bin/torchrun", line 7, in <module>
+    sys.exit(main())
+  File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/distributed/run.py", line 919, in main
+    run(args)
+  File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/distributed/run.py", line 910, in run
+    elastic_launch(
+  File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+run_eval.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-08-08_18:33:10
+  host      : lyh-debug-copy-copy--41115fe939b7-urbgz6kpby
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 58211)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

@@ -8,8 +8,9 @@ export TOKENIZERS_PARALLELISM=false
 
 export ENABLE_DEBUGPY=0
 
-export OPENDWM_ROOT=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/OpenDWM
-export CAMSIM_ROOT=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh
+
+export OPENDWM_ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM
+export CAMSIM_ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim
 
 export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
 export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/externals/TATS/tats/fvd:$PYTHONPATH"
@@ -17,10 +18,10 @@ export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanju
 export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/externals/waymo-open-dataset/src:$PYTHONPATH"
 
 torchrun \
-  --nproc_per_node=1 \
+  --nproc_per_node= \
   -m dwm.train \
-  -c /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/configs/lyh/PV_track_debug.json\
-  -o /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/debug \
+  -c /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/configs/lyh/bev_pv_epipolar_depth40_8gpu.json\
+  -o /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/train_bevpvepipolar \
   --log-steps 300 \
   --preview-steps 1000 \
   --checkpointing-steps 4000 \
