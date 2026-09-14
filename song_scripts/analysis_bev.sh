@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+source /inspire/ssd/project/advanced-machine-learning/public/inspire_shared/envs/lyhdwm/bin/activate
+cd /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/OpenDWM/src
+
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export OMP_NUM_THREADS=1
+export TOKENIZERS_PARALLELISM=false
+
+unset ENABLE_DEBUGPY
+
+export OPENDWM_ROOT=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/OpenDWM
+export CAMSIM_ROOT=/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh
+
+export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
+export PYTHONPATH="$OPENDWM_ROOT/externals/TATS/tats/fvd:$PYTHONPATH"
+export PYTHONPATH="$CAMSIM_ROOT/nuplan-devkit-master:$PYTHONPATH"
+export PYTHONPATH="$OPENDWM_ROOT/externals/waymo-open-dataset/src:$PYTHONPATH"
+
+torchrun \
+  --nproc_per_node=1 \
+  --master_port=29517 \
+  -m dwm.analyze_entity_reactor \
+  -c /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/OpenDWM/configs/song/bev_analysis.json \
+  --checkpoint /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output_song/bevbase/checkpoints \
+  -o /inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/output_song/bev_analysis/bev-step \
+  --sample-count 100 \
+  --sample-stride 10 --all-checkpoints
