@@ -4,7 +4,10 @@ song_output/
 
 # Third-party code
 nuplan-devkit-master/
-
+sam3-eval.zip/
+codex/
+lyh_bash/patch/
+sam3-eval/
 # Python cache
 __pycache__/
 *.py[cod]

@@ -1,0 +1,1528 @@
+diff --git a/OpenDWM/configs/camsim/waymo/waymopluckerpreview.json b/OpenDWM/configs/camsim/waymo/waymopluckerpreview.json
+index f28744d..e7b3a59 100644
+--- a/OpenDWM/configs/camsim/waymo/waymopluckerpreview.json
++++ b/OpenDWM/configs/camsim/waymo/waymopluckerpreview.json
+@@ -868,7 +868,7 @@
+                     "info_dict_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/waymo_balanced/validation.info.json",
+                     "sequence_length": 19,
+                     "fps_stride_tuples": [
+-                        [6,9]
++                        [6,3]
+                     ],
+                     "sensor_channels": [
+                         "LIDAR_TOP",
+diff --git a/OpenDWM/configs/lyh/bev_pv_epipolarpreview.json b/OpenDWM/configs/lyh/bev_pv_epipolarpreview.json
+index d8f113f..28c4d8a 100644
+--- a/OpenDWM/configs/lyh/bev_pv_epipolarpreview.json
++++ b/OpenDWM/configs/lyh/bev_pv_epipolarpreview.json
+@@ -99,12 +99,12 @@
+                 "crossview_mask",
+                 "view_consistency_pair_mask"
+             ],
+-            "evaluation_item_count": 480,
+             "eval_frame_export_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/nuplanhard1000/bev_pv_epipolar",
+             "eval_frame_dataset_name": "nuplan",
+             "eval_frame_manifest_name": "stflow_manifest.jsonl",
+             "eval_frame_image_quality": 95,
+             "eval_frame_export_paired_real": true,
++            "eval_frame_resume": true,
+             "all_rank_preview": true,
+             "eval_frame_export_box_image": true,
+             "eval_frame_export_box_params": true,
+diff --git a/OpenDWM/src/dwm/datasets/bevs/common.py b/OpenDWM/src/dwm/datasets/bevs/common.py
+index 24f28db..8e8fe74 100644
+--- a/OpenDWM/src/dwm/datasets/bevs/common.py
++++ b/OpenDWM/src/dwm/datasets/bevs/common.py
+@@ -167,6 +167,7 @@ def keep_training_keys(result: dict, stub_key_data_dict: Optional[dict]) -> dict
+         "bbox_token_corners",
+         "bbox_token_classes",
+         "bbox_token_masks",
++        "bbox_token_track_ids",
+     }
+     if stub_key_data_dict is not None:
+         keep.update(stub_key_data_dict.keys())
+diff --git a/OpenDWM/src/dwm/datasets/bevs/nuplan.py b/OpenDWM/src/dwm/datasets/bevs/nuplan.py
+index 93601a6..96eba68 100644
+--- a/OpenDWM/src/dwm/datasets/bevs/nuplan.py
++++ b/OpenDWM/src/dwm/datasets/bevs/nuplan.py
+@@ -91,7 +91,7 @@ class MotionDataset(nuplan_base.MotionDataset):
+                 )
+                 if slot is None:
+                     continue
+-                records.append((slot, class_id, box_index))
++                records.append((slot, class_id, track_id, box_index))
+                 frame_track_ids.append(track_id)
+             assert_unique_tracks(frame_track_ids, "NuPlan")
+             frame_records.append(records)
+@@ -118,10 +118,20 @@ class MotionDataset(nuplan_base.MotionDataset):
+             self.layout_max_boxes,
+             dtype=torch.float32,
+         )
++        track_ids = torch.zeros(
++            time_count,
++            self.layout_max_boxes,
++            dtype=torch.long,
++        )
++        local_id_by_track = {
++            track_id: local_id
++            for local_id, track_id in enumerate(slot_by_track, start=1)
++        }
+ 
+         for time_index, records in enumerate(frame_records):
+             info = seq[time_index]
+-            for slot, class_id, box_index in records:
++            for slot, class_id, track_id, box_index in records:
++                track_ids[time_index, slot] = local_id_by_track[track_id]
+                 box = np.asarray(info["gt_boxes"][box_index][:7], dtype=np.float32)
+                 box_corners_np = self._mdtoken_box_corners_lidar_xyz(box)
+                 box_corners = torch.from_numpy(box_corners_np).float()
+@@ -137,7 +147,7 @@ class MotionDataset(nuplan_base.MotionDataset):
+                     if visible:
+                         masks[time_index, view_index, slot] = 1.0
+ 
+-        return corners, classes, masks
++        return corners, classes, masks, track_ids
+ 
+     def __getitem__(self, index):
+         item = self.items[index]
+@@ -226,7 +236,7 @@ class MotionDataset(nuplan_base.MotionDataset):
+             for info in seq
+         ]
+ 
+-        corners, classes, masks = self._stable_layout_tokens(
++        corners, classes, masks, track_ids = self._stable_layout_tokens(
+             seq,
+             cam_infos,
+             image_sizes,
+@@ -235,6 +245,7 @@ class MotionDataset(nuplan_base.MotionDataset):
+         result["bbox_token_corners"] = corners
+         result["bbox_token_classes"] = classes
+         result["bbox_token_masks"] = masks
++        result["bbox_token_track_ids"] = track_ids
+ 
+         camera_transforms = []
+         for row_infos in cam_infos:
+diff --git a/OpenDWM/src/dwm/datasets/bevs/nuscenes.py b/OpenDWM/src/dwm/datasets/bevs/nuscenes.py
+index 7927035..904ee0a 100644
+--- a/OpenDWM/src/dwm/datasets/bevs/nuscenes.py
++++ b/OpenDWM/src/dwm/datasets/bevs/nuscenes.py
+@@ -200,7 +200,9 @@ class MotionDataset(OpenDWMMotionDataset):
+                 )
+                 if slot is None:
+                     continue
+-                current_records.append((slot, class_id, annotation))
++                current_records.append(
++                    (slot, class_id, track_id, annotation)
++                )
+                 current_track_ids.append(track_id)
+             assert_unique_tracks(current_track_ids, "nuScenes")
+             frame_records.append((ref_sample_data, current_records))
+@@ -239,9 +241,19 @@ class MotionDataset(OpenDWMMotionDataset):
+             self.layout_max_boxes,
+             dtype=torch.float32,
+         )
++        track_ids = torch.zeros(
++            time_count,
++            self.layout_max_boxes,
++            dtype=torch.long,
++        )
++        local_id_by_track = {
++            track_id: local_id
++            for local_id, track_id in enumerate(slot_by_track, start=1)
++        }
+ 
+         for time_index, (ref_sample_data, records) in enumerate(frame_records):
+-            for slot, class_id, annotation in records:
++            for slot, class_id, track_id, annotation in records:
++                track_ids[time_index, slot] = local_id_by_track[track_id]
+                 box_corners = self._annotation_corners(
+                     annotation,
+                     ref_sample_data,
+@@ -256,7 +268,7 @@ class MotionDataset(OpenDWMMotionDataset):
+                     ):
+                         masks[time_index, view_index, slot] = 1.0
+ 
+-        return corners, classes, masks
++        return corners, classes, masks, track_ids
+ 
+     def __getitem__(self, index):
+         result = super().__getitem__(index)
+@@ -282,8 +294,11 @@ class MotionDataset(OpenDWMMotionDataset):
+             reference_ego_transforms
+         )
+ 
+-        corners, classes, masks = self._stable_layout_tokens(segment)
++        corners, classes, masks, track_ids = self._stable_layout_tokens(
++            segment
++        )
+         result["bbox_token_corners"] = corners
+         result["bbox_token_classes"] = classes
+         result["bbox_token_masks"] = masks
++        result["bbox_token_track_ids"] = track_ids
+         return keep_training_keys(result, self.stub_key_data_dict)
+diff --git a/OpenDWM/src/dwm/datasets/bevs/waymo.py b/OpenDWM/src/dwm/datasets/bevs/waymo.py
+index 437f18f..d5ddcc2 100644
+--- a/OpenDWM/src/dwm/datasets/bevs/waymo.py
++++ b/OpenDWM/src/dwm/datasets/bevs/waymo.py
+@@ -230,7 +230,7 @@ class MotionDataset(OpenDWMMotionDataset):
+                 )
+                 if slot is None:
+                     continue
+-                records.append((slot, class_id, label))
++                records.append((slot, class_id, track_id, label))
+                 frame_track_ids.append(track_id)
+             assert_unique_tracks(frame_track_ids, "Waymo")
+             frame_records.append(records)
+@@ -257,6 +257,15 @@ class MotionDataset(OpenDWMMotionDataset):
+             self.layout_max_boxes,
+             dtype=torch.float32,
+         )
++        track_ids = torch.zeros(
++            time_count,
++            self.layout_max_boxes,
++            dtype=torch.long,
++        )
++        local_id_by_track = {
++            track_id: local_id
++            for local_id, track_id in enumerate(slot_by_track, start=1)
++        }
+ 
+         for time_index, records in enumerate(frame_records):
+             frame = frames[time_index]
+@@ -267,7 +276,8 @@ class MotionDataset(OpenDWMMotionDataset):
+                 )
+                 for channel in camera_channels
+             ]
+-            for slot, class_id, label in records:
++            for slot, class_id, track_id, label in records:
++                track_ids[time_index, slot] = local_id_by_track[track_id]
+                 box_corners = self._label_corners(label)
+                 for view_index, calibration in enumerate(calibrations):
+                     corners[time_index, view_index, slot] = box_corners
+@@ -278,7 +288,7 @@ class MotionDataset(OpenDWMMotionDataset):
+                     ):
+                         masks[time_index, view_index, slot] = 1.0
+ 
+-        return corners, classes, masks
++        return corners, classes, masks, track_ids
+ 
+     def __getitem__(self, index):
+         item = self.items[index]
+@@ -407,13 +417,14 @@ class MotionDataset(OpenDWMMotionDataset):
+             for frame in frames
+         ]
+ 
+-        corners, classes, masks = self._stable_layout_tokens(
++        corners, classes, masks, track_ids = self._stable_layout_tokens(
+             frames,
+             camera_channels,
+         )
+         result["bbox_token_corners"] = corners
+         result["bbox_token_classes"] = classes
+         result["bbox_token_masks"] = masks
++        result["bbox_token_track_ids"] = track_ids
+ 
+         if self.image_description_settings is not None:
+             image_captions = []
+diff --git a/OpenDWM/src/dwm/datasets/lyh/track_pv_bev_argoverse.py b/OpenDWM/src/dwm/datasets/lyh/track_pv_bev_argoverse.py
+index 1a49628..bc714e0 100644
+--- a/OpenDWM/src/dwm/datasets/lyh/track_pv_bev_argoverse.py
++++ b/OpenDWM/src/dwm/datasets/lyh/track_pv_bev_argoverse.py
+@@ -135,7 +135,16 @@ class MotionDataset(TrackPVMotionDataset):
+                     )
+                     if slot is None:
+                         continue
+-                    records.append((slot, class_id, row, target_ts, anno_ts))
++                    records.append(
++                        (
++                            slot,
++                            class_id,
++                            track_id,
++                            row,
++                            target_ts,
++                            anno_ts,
++                        )
++                    )
+                     frame_track_ids.append(track_id)
+ 
+             assert_unique_tracks(frame_track_ids, "Argoverse")
+@@ -168,9 +177,26 @@ class MotionDataset(TrackPVMotionDataset):
+         masks = torch.zeros(
+             time_count, view_count, self.layout_max_boxes, dtype=torch.float32
+         )
++        track_ids = torch.zeros(
++            time_count,
++            self.layout_max_boxes,
++            dtype=torch.long,
++        )
++        local_id_by_track = {
++            track_id: local_id
++            for local_id, track_id in enumerate(slot_by_track, start=1)
++        }
+ 
+         for t, records in enumerate(frame_records):
+-            for slot, class_id, row, target_ts, anno_ts in records:
++            for (
++                slot,
++                class_id,
++                track_id,
++                row,
++                target_ts,
++                anno_ts,
++            ) in records:
++                track_ids[t, slot] = local_id_by_track[track_id]
+                 box = self._annotation_corners(
+                     annotations, row, target_ts, anno_ts, poses
+                 )
+@@ -188,7 +214,7 @@ class MotionDataset(TrackPVMotionDataset):
+                     ):
+                         masks[t, v, slot] = 1.0
+ 
+-        return corners, classes, masks
++        return corners, classes, masks, track_ids
+ 
+     def __getitem__(self, index):
+         # images/camera geometry/3dbox/static BEV map all come from track_pv.
+@@ -217,12 +243,13 @@ class MotionDataset(TrackPVMotionDataset):
+             dim=0,
+         )
+ 
+-        corners, classes, masks = self._stable_layout_tokens(
++        corners, classes, masks, track_ids = self._stable_layout_tokens(
+             item, annotations, poses, extrinsics, intrinsics
+         )
+         result["bbox_token_corners"] = corners
+         result["bbox_token_classes"] = classes
+         result["bbox_token_masks"] = masks
++        result["bbox_token_track_ids"] = track_ids
+ 
+         if self.hdmap_bev_settings is not None and "hdmap_bev_images" not in result:
+             raise KeyError(
+diff --git a/OpenDWM/src/dwm/datasets/waymo.py b/OpenDWM/src/dwm/datasets/waymo.py
+index b6ebcd5..49c5271 100644
+--- a/OpenDWM/src/dwm/datasets/waymo.py
++++ b/OpenDWM/src/dwm/datasets/waymo.py
+@@ -1052,6 +1052,81 @@ class MotionDataset(torch.utils.data.Dataset):
+             return 7      # cyclist
+ 
+         return 0
++
++    def get_3dbox_export_records(self, frame):
++        """Return per-instance GT boxes in the Waymo vehicle frame.
++
++        Waymo ``laser_labels`` are expressed in the current vehicle/ego
++        frame.  Export corners in that frame so they use the same geometry as
++        ``get_3dbox_image`` and can be paired with
++        ``box_reference_to_camera`` by the common preview exporter.
++        """
++        color_table = MotionDataset.default_3dbox_color_table
++        if self._3dbox_image_settings is not None:
++            color_table = self._3dbox_image_settings.get(
++                "color_table",
++                color_table,
++            )
++        allowed_types = set(color_table)
++        corner_template = np.asarray(
++            MotionDataset.default_3dbox_corner_template,
++            dtype=np.float32,
++        ).T
++        records = []
++
++        for label in frame.laser_labels:
++            label_type = int(label.type)
++            class_name = next(
++                (
++                    name
++                    for name, type_id in MotionDataset.box_type_dict.items()
++                    if type_id == label_type
++                ),
++                None,
++            )
++            if class_name is None or class_name not in allowed_types:
++                continue
++
++            box = label.box
++            box_values = np.asarray(
++                [
++                    box.center_x,
++                    box.center_y,
++                    box.center_z,
++                    box.length,
++                    box.width,
++                    box.height,
++                    box.heading,
++                ],
++                dtype=np.float32,
++            )
++            if not np.isfinite(box_values).all():
++                continue
++
++            ego_from_box = dwm.datasets.common.get_transform(
++                transforms3d.euler.euler2quat(
++                    0,
++                    0,
++                    float(box.heading),
++                ).tolist(),
++                [box.center_x, box.center_y, box.center_z],
++            ).astype(np.float32)
++            box_scale = np.diag(
++                [box.length, box.width, box.height, 1.0]
++            ).astype(np.float32)
++            corners_ref = (
++                ego_from_box @ box_scale @ corner_template
++            )[:3].T.astype(np.float32, copy=False)
++
++            records.append(
++                {
++                    "gt_id": str(label.id),
++                    "class_name": class_name,
++                    "corners_ref": corners_ref.tolist(),
++                }
++            )
++        return records
++
+     ###增加筛选平衡后的json########
+     def __init__(
+         self,
+@@ -1071,7 +1146,8 @@ class MotionDataset(torch.utils.data.Dataset):
+         balanced_json_path=None,
+         dataset_root=None,
+         layout_token_settings: dict = None,
+-        split: str = "train" 
++        split: str = "train",
++        enable_3dbox_records: bool = False,
+     ):
+ 
+         self.fs = fs
+@@ -1089,6 +1165,7 @@ class MotionDataset(torch.utils.data.Dataset):
+         self.stub_key_data_dict = stub_key_data_dict
+         self.split =split
+         self.layout_token_settings = layout_token_settings
++        self.enable_3dbox_records = bool(enable_3dbox_records)
+         self.items = []
+ 
+         # ===============================
+@@ -1543,6 +1620,22 @@ class MotionDataset(torch.utils.data.Dataset):
+                 for i in frames
+             ])
+ 
++        if self.enable_3dbox_records:
++            if "camera_transforms" not in result:
++                raise ValueError(
++                    "enable_3dbox_records requires "
++                    "enable_camera_transforms=true."
++                )
++            result["3dbox_records"] = [
++                self.get_3dbox_export_records(frame)
++                for frame in frames
++            ]
++            # ``camera_transforms`` is camera-to-reference-ego in the same
++            # corrected coordinate convention used by the raster box renderer.
++            result["box_reference_to_camera"] = torch.linalg.inv(
++                result["camera_transforms"]
++            )
++
+         # ---------------------------
+         # 3D box 图像
+         # ---------------------------
+@@ -1696,4 +1789,4 @@ class MotionDataset(torch.utils.data.Dataset):
+             result["dist"] = torch.tensor(item["dist"]).float()
+ 
+         # 返回最终样本
+-        return result
+\ No newline at end of file
++        return result
+diff --git a/OpenDWM/src/dwm/models/lyh/bev_pv_plucker_epipolar.py b/OpenDWM/src/dwm/models/lyh/bev_pv_plucker_epipolar.py
+index 5a0ccf1..0e48ffa 100644
+--- a/OpenDWM/src/dwm/models/lyh/bev_pv_plucker_epipolar.py
++++ b/OpenDWM/src/dwm/models/lyh/bev_pv_plucker_epipolar.py
+@@ -197,6 +197,79 @@ class ViewConsistencyProjector(torch.nn.Module):
+         return self.net(feature_map)
+ 
+ 
++class TrackConsistencyProjector(ViewConsistencyProjector):
++    """Independent projector for Track-ID object consistency."""
++
++
++def project_selected_feature_pairs(
++    hidden_states: torch.Tensor,
++    selection: torch.Tensor,
++    projector: torch.nn.Module,
++    batch_size: int,
++    sequence_length: int,
++    view_count: int,
++    height: int,
++    width: int,
++    selection_name: str,
++) -> torch.Tensor:
++    """Gather and project only selected pairs, avoiding a full BTV copy."""
++    selection = selection.to(device=hidden_states.device, dtype=torch.long)
++    if selection.ndim == 2:
++        selection = selection.unsqueeze(1)
++    if (
++        selection.ndim != 3
++        or selection.shape[0] != batch_size
++        or selection.shape[-1] != 4
++    ):
++        raise ValueError(
++            f"{selection_name} must be [B,K,4] with "
++            "[time_a, view_a, time_b, view_b], got "
++            f"{tuple(selection.shape)}"
++        )
++
++    feature_grid = einops.rearrange(
++        hidden_states,
++        "(b t v) (h w) c -> b t v c h w",
++        b=batch_size,
++        t=sequence_length,
++        v=view_count,
++        h=height,
++        w=width,
++    )
++    pair_count = selection.shape[1]
++    batch_ids = torch.arange(
++        batch_size,
++        device=hidden_states.device,
++        dtype=torch.long,
++    ).unsqueeze(1).expand(batch_size, pair_count)
++    time_a_ids = selection[..., 0].clamp(0, sequence_length - 1)
++    view_a_ids = selection[..., 1].clamp(0, view_count - 1)
++    time_b_ids = selection[..., 2].clamp(0, sequence_length - 1)
++    view_b_ids = selection[..., 3].clamp(0, view_count - 1)
++    feature_a = feature_grid[batch_ids, time_a_ids, view_a_ids]
++    feature_b = feature_grid[batch_ids, time_b_ids, view_b_ids]
++    feature_pair = torch.cat(
++        [
++            feature_a.reshape(-1, *feature_a.shape[-3:]),
++            feature_b.reshape(-1, *feature_b.shape[-3:]),
++        ],
++        dim=0,
++    )
++    projected_pair = projector(feature_pair)
++    projected_a, projected_b = projected_pair.chunk(2, dim=0)
++    projected_a = projected_a.reshape(
++        batch_size,
++        pair_count,
++        *projected_a.shape[1:],
++    )
++    projected_b = projected_b.reshape(
++        batch_size,
++        pair_count,
++        *projected_b.shape[1:],
++    )
++    return torch.stack([projected_a, projected_b], dim=2)
++
++
+ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+     @diffusers.configuration_utils.register_to_config
+     def __init__(
+@@ -213,6 +286,7 @@ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+         trajectory_translation_scale: float = 10.0,
+         condition_image_adapter_config: Optional[dict] = None,
+         view_consistency_config: Optional[dict] = None,
++        track_consistency_config: Optional[dict] = None,
+         **kwargs,
+     ):
+         super().__init__(
+@@ -274,6 +348,44 @@ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+                 num_layers=consistency_projector_layers,
+             )
+ 
++        track_config = dict(track_consistency_config or {})
++        self.enable_track_consistency_features = bool(
++            track_config.pop("enabled", False)
++        )
++        self.track_consistency_layer_id = int(
++            track_config.pop("layer_id", 13)
++        )
++        track_projector_dim = int(track_config.pop("projector_dim", 128))
++        track_hidden_dim = int(
++            track_config.pop("projector_hidden_dim", 256)
++        )
++        track_projector_layers = int(
++            track_config.pop("projector_layers", 2)
++        )
++        if track_config:
++            raise ValueError(
++                "Unsupported track_consistency_config keys: "
++                f"{sorted(track_config.keys())}"
++            )
++
++        self.track_consistency_projector = None
++        if self.enable_track_consistency_features:
++            if (
++                self.track_consistency_layer_id
++                not in self.additional_layer_index
++            ):
++                raise ValueError(
++                    "track_consistency layer_id must be one of block_layers. "
++                    f"Got layer_id={self.track_consistency_layer_id}, "
++                    f"block_layers={self.block_layers}."
++                )
++            self.track_consistency_projector = TrackConsistencyProjector(
++                in_channels=inner_dim,
++                out_channels=track_projector_dim,
++                hidden_channels=track_hidden_dim,
++                num_layers=track_projector_layers,
++            )
++
+         # PV image-condition branch. This is intentionally independent from
+         # BEV token/residual conditioning and from Pluecker/normal CA.
+         if condition_image_adapter_config is not None:
+@@ -743,6 +855,7 @@ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+         disable_temporal: torch.BoolTensor,
+         condition_image_tensor: torch.Tensor = None,
+         view_consistency_selection: torch.Tensor = None,
++        track_consistency_selection: torch.Tensor = None,
+         return_dict: bool = False,
+     ):
+         if sample.ndim != 6:
+@@ -830,6 +943,7 @@ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+ 
+         disable_crossview = torch.zeros_like(disable_temporal, dtype=torch.bool)
+         view_consistency_features = None
++        track_consistency_features = None
+ 
+         for layer_index, block in enumerate(self.transformer_blocks):
+             # Preserve the original PVTrack adapter semantics: one adapter
+@@ -888,6 +1002,23 @@ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+                     condition_mask,
+                 )
+ 
++            if (
++                self.enable_track_consistency_features
++                and track_consistency_selection is not None
++                and layer_index == self.track_consistency_layer_id
++            ):
++                track_consistency_features = project_selected_feature_pairs(
++                    hidden_states,
++                    track_consistency_selection,
++                    self.track_consistency_projector,
++                    batch_size,
++                    sequence_length,
++                    view_count,
++                    height,
++                    width,
++                    "track_consistency_selection",
++                )
++
+             temporal_embedding = base_time_embedding[:, :, None].expand(
+                 batch_size,
+                 sequence_length,
+@@ -960,75 +1091,16 @@ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+                 and view_consistency_selection is not None
+                 and layer_index == self.view_consistency_layer_id
+             ):
+-                selection = view_consistency_selection.to(
+-                    device=hidden_states.device,
+-                    dtype=torch.long,
+-                )
+-                if selection.ndim == 2:
+-                    selection = selection.unsqueeze(1)
+-                if (
+-                    selection.ndim != 3
+-                    or selection.shape[0] != batch_size
+-                    or selection.shape[-1] != 4
+-                ):
+-                    raise ValueError(
+-                        "view_consistency_selection must be [B,K,4] with "
+-                        "[time_a, view_a, time_b, view_b], got "
+-                        f"{tuple(selection.shape)}"
+-                    )
+-
+-                feature_grid = einops.rearrange(
++                view_consistency_features = project_selected_feature_pairs(
+                     hidden_states,
+-                    "(b t v) (h w) c -> b t v c h w",
+-                    b=batch_size,
+-                    t=sequence_length,
+-                    v=view_count,
+-                    h=height,
+-                    w=width,
+-                )
+-                pair_count = selection.shape[1]
+-                batch_ids = torch.arange(
+-                    batch_size,
+-                    device=hidden_states.device,
+-                    dtype=torch.long,
+-                ).unsqueeze(1).expand(batch_size, pair_count)
+-                time_a_ids = selection[..., 0].clamp(0, sequence_length - 1)
+-                view_a_ids = selection[..., 1].clamp(0, view_count - 1)
+-                time_b_ids = selection[..., 2].clamp(0, sequence_length - 1)
+-                view_b_ids = selection[..., 3].clamp(0, view_count - 1)
+-
+-                feature_a = feature_grid[
+-                    batch_ids,
+-                    time_a_ids,
+-                    view_a_ids,
+-                ]
+-                feature_b = feature_grid[
+-                    batch_ids,
+-                    time_b_ids,
+-                    view_b_ids,
+-                ]
+-                feature_pair = torch.cat(
+-                    [
+-                        feature_a.reshape(-1, *feature_a.shape[-3:]),
+-                        feature_b.reshape(-1, *feature_b.shape[-3:]),
+-                    ],
+-                    dim=0,
+-                )
+-                projected_pair = self.view_consistency_projector(feature_pair)
+-                projected_a, projected_b = projected_pair.chunk(2, dim=0)
+-                projected_a = projected_a.reshape(
+-                    batch_size,
+-                    pair_count,
+-                    *projected_a.shape[1:],
+-                )
+-                projected_b = projected_b.reshape(
++                    view_consistency_selection,
++                    self.view_consistency_projector,
+                     batch_size,
+-                    pair_count,
+-                    *projected_b.shape[1:],
+-                )
+-                view_consistency_features = torch.stack(
+-                    [projected_a, projected_b],
+-                    dim=2,
++                    sequence_length,
++                    view_count,
++                    height,
++                    width,
++                    "view_consistency_selection",
+                 )
+ 
+         hidden_states = self.norm_out(hidden_states, temb)
+@@ -1054,9 +1126,13 @@ class BEVConditionedSD3TransformerModel(diffusers.SD3Transformer2DModel):
+             result = {"noise_pred": output}
+             if view_consistency_features is not None:
+                 result["view_consistency_features"] = view_consistency_features
++            if track_consistency_features is not None:
++                result["track_consistency_features"] = track_consistency_features
+             return result
+ 
+         model_outputs = [output]
+         if view_consistency_features is not None:
+             model_outputs.append(view_consistency_features)
++        if track_consistency_features is not None:
++            model_outputs.append(track_consistency_features)
+         return model_outputs, encoder_hidden_states, pooled_projections
+diff --git a/OpenDWM/src/dwm/pipelines/camsim.py b/OpenDWM/src/dwm/pipelines/camsim.py
+index 3c49241..30511fc 100644
+--- a/OpenDWM/src/dwm/pipelines/camsim.py
++++ b/OpenDWM/src/dwm/pipelines/camsim.py
+@@ -2862,6 +2862,19 @@ class CrossviewTemporalSD():
+ 
+         return result
+ 
++    def _prepare_eval_frame_resume(
++        self,
++        item_limit: int,
++        loader_batch_size: int,
++    ) -> int:
++        """Use the shared BEVPVEpi-compatible manifest resume logic."""
++        return dwm.utils.preview.prepare_eval_frame_resume(
++            inference_config=self.inference_config,
++            device=self.device,
++            item_limit=item_limit,
++            loader_batch_size=loader_batch_size,
++        )
++
+     @torch.no_grad()
+     def preview_pipeline(
+         self, batch: dict, output_path: str, global_step: int
+@@ -3526,4 +3539,4 @@ class StreamingCrossviewTemporalSD(CrossviewTemporalSD):
+                 video_output_path = os.path.join(
+                     output_path, "preview_depth", "{}.mp4".format(filename))
+                 dwm.utils.preview.save_tensor_to_video(
+-                    video_output_path, "libx264", 5, pipeline_output["depth"])
+\ No newline at end of file
++                    video_output_path, "libx264", 5, pipeline_output["depth"])
+diff --git a/OpenDWM/src/dwm/pipelines/lyh/bev_pv_epipolar.py b/OpenDWM/src/dwm/pipelines/lyh/bev_pv_epipolar.py
+index 7b1c178..e0501f2 100644
+--- a/OpenDWM/src/dwm/pipelines/lyh/bev_pv_epipolar.py
++++ b/OpenDWM/src/dwm/pipelines/lyh/bev_pv_epipolar.py
+@@ -21,6 +21,7 @@ import dwm.common
+ import dwm.distributed
+ import dwm.functional
+ import dwm.utils.preview
++import dwm.utils.track_consistency
+ import dwm.utils.view_consistency
+ from dwm.models.bev_models.condition import (
+     ConditionCrossAttention,
+@@ -899,17 +900,41 @@ class BEVPipeline:
+                 view_consistency_selection
+             )
+ 
++        track_consistency_selection_result = (
++            dwm.utils.track_consistency.sample_track_consistency_selection(
++                batch=batch,
++                training_config=self.training_config,
++                generator=self.generator,
++                device=self.device,
++            )
++        )
++        if track_consistency_selection_result is None:
++            track_consistency_selection = None
++            track_consistency_selection_cpu = None
++            track_consistency_pair_types_cpu = None
++        else:
++            (
++                track_consistency_selection,
++                track_consistency_selection_cpu,
++                track_consistency_pair_types_cpu,
++            ) = track_consistency_selection_result
++            model_conditions["track_consistency_selection"] = (
++                track_consistency_selection
++            )
++
+         model_output, _, _ = self.model_wrapper(
+             noisy_latents.to(self.model_dtype),
+             timesteps,
+             **model_conditions,
+         )
+-        projected_features = (
+-            model_output[1]
+-            if view_consistency_selection is not None
+-            and len(model_output) > 1
+-            else None
+-        )
++        auxiliary_output_index = 1
++        projected_features = None
++        if view_consistency_selection is not None:
++            projected_features = model_output[auxiliary_output_index]
++            auxiliary_output_index += 1
++        track_projected_features = None
++        if track_consistency_selection is not None:
++            track_projected_features = model_output[auxiliary_output_index]
+         predicted_latents = model_output[0] * (-sigmas) + noisy_latents
+         squared_error = (
+             predicted_latents.float() - latents.float()
+@@ -975,35 +1000,100 @@ class BEVPipeline:
+         else:
+             warmup_ratio = 1.0
+         effective_consistency_weight = consistency_weight * warmup_ratio
+-        loss = sd_loss + effective_consistency_weight * view_consistency_loss
++
++        track_weight = float(
++            self.training_config.get(
++                "track_consistency_loss_weight",
++                0.0,
++            )
++        )
++        track_statistics = {
++            "track_loss": sd_loss.new_zeros(()),
++            "track_spatial_loss": sd_loss.new_zeros(()),
++            "track_temporal_loss": sd_loss.new_zeros(()),
++            "track_valid_pair_count": 0.0,
++            "track_valid_query_count": 0.0,
++            "track_skipped_small_region_count": 0.0,
++            "track_hard_negative_count": 0.0,
++            "track_positive_similarity": sd_loss.new_zeros(()),
++            "track_negative_similarity": sd_loss.new_zeros(()),
++            "track_similarity_gap": sd_loss.new_zeros(()),
++            "track_retrieval_at_1": 0.0,
++            "track_spatial_retrieval_at_1": 0.0,
++            "track_temporal_retrieval_at_1": 0.0,
++            "hard_negative_mean_similarity": sd_loss.new_zeros(()),
++        }
++        if track_weight > 0.0 and track_consistency_selection is not None:
++            track_statistics = (
++                dwm.utils.track_consistency.compute_track_consistency_loss(
++                    batch=batch,
++                    projected_features=track_projected_features,
++                    selection_cpu=track_consistency_selection_cpu,
++                    pair_types_cpu=track_consistency_pair_types_cpu,
++                    training_config=self.training_config,
++                    device=self.device,
++                )
++            )
++        track_warmup_steps = int(
++            self.training_config.get(
++                "track_consistency_loss_warmup_steps",
++                0,
++            )
++        )
++        if track_warmup_steps > 0:
++            track_warmup_ratio = min(
++                float(global_step + 1) / float(track_warmup_steps),
++                1.0,
++            )
++        else:
++            track_warmup_ratio = 1.0
++        effective_track_weight = track_weight * track_warmup_ratio
++        loss = (
++            sd_loss
++            + effective_consistency_weight * view_consistency_loss
++            + effective_track_weight * track_statistics["track_loss"]
++        )
+ 
+         if not torch.isfinite(loss):
+             raise RuntimeError(
+-                f"Non-finite BEV epipolar training loss at step "
++                f"Non-finite BEV training loss at step "
+                 f"{global_step + 1}."
+             )
+ 
+-        self.loss_report_list.append(
+-            {
+-                "loss": float(loss.detach()),
+-                "sd_loss": float(sd_loss.detach()),
+-                "view_consistency_loss": float(
+-                    view_consistency_loss.detach()
+-                ),
+-                "view_consistency_weight": float(
+-                    effective_consistency_weight
+-                ),
+-                "bev_condition_keep_rate": float(
+-                    condition_keep.float().mean()
+-                ),
+-                "pv_condition_keep_rate": float(
+-                    pv_condition_keep.float().mean()
+-                ),
+-                "pv_extra_keep_rate": float(
+-                    pv_extra_keep.float().mean()
+-                ),
+-            }
+-        )
++        loss_report = {
++            "loss": float(loss.detach()),
++            "sd_loss": float(sd_loss.detach()),
++            "view_consistency_loss": float(
++                view_consistency_loss.detach()
++            ),
++            "view_consistency_weight": float(
++                effective_consistency_weight
++            ),
++            "bev_condition_keep_rate": float(
++                condition_keep.float().mean()
++            ),
++            "pv_condition_keep_rate": float(
++                pv_condition_keep.float().mean()
++            ),
++            "pv_extra_keep_rate": float(
++                pv_extra_keep.float().mean()
++            ),
++        }
++        if track_weight > 0.0:
++            loss_report["track_consistency_weight"] = float(
++                effective_track_weight
++            )
++            loss_report.update(
++                {
++                    key: (
++                        float(value.detach())
++                        if isinstance(value, torch.Tensor)
++                        else float(value)
++                    )
++                    for key, value in track_statistics.items()
++                }
++            )
++        self.loss_report_list.append(loss_report)
+         self.grad_scaler.scale(loss).backward()
+         self.grad_scaler.step(self.optimizer)
+         self.grad_scaler.update()
+@@ -1203,15 +1293,34 @@ class BEVPipeline:
+                 images.extend(image_list)
+         return {"images": images, "latents": image_latents}
+ 
++    def _get_eval_frame_export_path(self) -> Optional[str]:
++        return dwm.utils.preview.get_eval_frame_export_path(
++            self.inference_config
++        )
++
++    def _get_eval_frame_manifest_path(self) -> Optional[str]:
++        return dwm.utils.preview.get_eval_frame_manifest_path(
++            self.inference_config
++        )
++
++    def _prepare_eval_frame_resume(
++        self,
++        item_limit: int,
++        loader_batch_size: int,
++    ) -> int:
++        return dwm.utils.preview.prepare_eval_frame_resume(
++            inference_config=self.inference_config,
++            device=self.device,
++            item_limit=item_limit,
++            loader_batch_size=loader_batch_size,
++        )
++
+     def _export_eval_frames(
+         self,
+         output_images: torch.Tensor,
+         batch: dict,
+     ):
+-        eval_frame_export_path = self.inference_config.get(
+-            "eval_frame_export_path",
+-            None,
+-        )
++        eval_frame_export_path = self._get_eval_frame_export_path()
+         if eval_frame_export_path is None:
+             return
+ 
+@@ -1235,12 +1344,6 @@ class BEVPipeline:
+         if not save_this_rank:
+             return
+ 
+-        if all_rank_preview and dist_on:
+-            eval_frame_export_path = os.path.join(
+-                eval_frame_export_path,
+-                "rank_{:02d}".format(rank),
+-            )
+-
+         # RGB exporter只负责生成图/真实图。
+         # 即使JSON里残留box字段，也强制不导出box。
+         rgb_export_config = dict(
+@@ -1324,15 +1427,6 @@ class BEVPipeline:
+ 
+         preview_images = pipeline_output["images"]
+ 
+-        # ====================================================
+-        # 保存生成RGB + paired real + manifest
+-        # ====================================================
+-
+-        self._export_eval_frames(
+-            preview_images,
+-            batch,
+-        )
+-
+         # ====================================================
+         # 原preview视频保存逻辑
+         # ====================================================
+@@ -1445,6 +1539,13 @@ class BEVPipeline:
+                 preview_tensor,
+             )
+ 
++        # Export after the preview image/video succeeds. The manifest line is
++        # therefore the resume commit marker for all outputs of this batch.
++        self._export_eval_frames(
++            preview_images,
++            batch,
++        )
++
+     @torch.no_grad()
+     def evaluate_pipeline(
+         self,
+@@ -1457,25 +1558,78 @@ class BEVPipeline:
+             torch.distributed.is_initialized()
+             and validation_datasampler is not None
+         ):
++            # Keep the distributed sampling order stable across restarts.
+             validation_datasampler.set_epoch(0)
++
+         world_size = (
+             torch.distributed.get_world_size()
+             if torch.distributed.is_initialized()
+             else 1
+         )
+         item_limit = int(
+-            self.inference_config.get("evaluation_item_count", dataset_length)
++            self.inference_config.get(
++                "evaluation_item_count",
++                dataset_length,
++            )
+         ) // world_size
+ 
++        loader_batch_size = validation_dataloader.batch_size
++        if loader_batch_size is None:
++            loader_batch_size = 1
++        loader_batch_size = int(loader_batch_size)
++
++        resume_count = self._prepare_eval_frame_resume(
++            item_limit=item_limit,
++            loader_batch_size=loader_batch_size,
++        )
++
++        if resume_count >= item_limit:
++            return
++
++        if resume_count > 0:
++            dist_on = (
++                torch.distributed.is_available()
++                and torch.distributed.is_initialized()
++            )
++            rank = torch.distributed.get_rank() if dist_on else 0
++            print(
++                "[BEV_EVAL_RESUME] "
++                f"rank={rank} skip first {resume_count} local samples "
++                f"and continue until {item_limit}.",
++                flush=True,
++            )
++
++        seen_items = 0
+         for batch_index, batch in enumerate(validation_dataloader):
+             batch_size, _, view_count = batch["vae_images"].shape[:3]
+-            if batch_index * batch_size >= item_limit:
++            batch_start = seen_items
++            batch_stop = batch_start + batch_size
++            seen_items = batch_stop
++
++            if batch_start >= item_limit:
+                 break
++
++            if batch_stop <= resume_count:
++                continue
++
++            if batch_start < resume_count:
++                raise RuntimeError(
++                    "Resume point falls inside a validation batch: "
++                    f"batch_index={batch_index}, "
++                    f"batch_range=[{batch_start}, {batch_stop}), "
++                    f"resume_count={resume_count}. "
++                    "This should have been aligned to a batch boundary."
++                )
++
+             latent_height = batch["vae_images"].shape[-2] // 8
+             latent_width = batch["vae_images"].shape[-1] // 8
+             latent_shape = (
+                 batch_size,
+-                int(self.inference_config["sequence_length_per_iteration"]),
++                int(
++                    self.inference_config[
++                        "sequence_length_per_iteration"
++                    ]
++                ),
+                 view_count,
+                 self.vae.config.latent_channels,
+                 latent_height,
+@@ -1489,7 +1643,8 @@ class BEVPipeline:
+ 
+             raw_fake_images = pipeline_output["images"]
+ 
+-            # 保存generated / paired real / manifest
++            # Export only after the full sample inference succeeds.
++            # One manifest line therefore acts as the resume commit marker.
+             self._export_eval_frames(
+                 raw_fake_images,
+                 batch,
+@@ -1504,9 +1659,15 @@ class BEVPipeline:
+                 ),
+             )
+             real_start = (
+-                int(self.inference_config["reference_frame_count"])
++                int(
++                    self.inference_config[
++                        "reference_frame_count"
++                    ]
++                )
+                 if not bool(
+-                    self.inference_config["generate_frames_for_reference"]
++                    self.inference_config[
++                        "generate_frames_for_reference"
++                    ]
+                 )
+                 else 0
+             )
+@@ -1554,6 +1715,7 @@ class BEVPipeline:
+         if self.should_save:
+             print(message, flush=True)
+ 
++
+     def save_checkpoint(self, output_path: str, steps: int):
+         if torch.distributed.is_initialized():
+             options = (
+diff --git a/OpenDWM/src/dwm/preview.py b/OpenDWM/src/dwm/preview.py
+index 693f81e..686269a 100644
+--- a/OpenDWM/src/dwm/preview.py
++++ b/OpenDWM/src/dwm/preview.py
+@@ -20,6 +20,27 @@ import torch
+ import dwm.common
+ 
+ 
++def resolve_preview_item_limit(inference_config, dataset_length, world_size=1):
++    """Resolve the per-rank preview limit from a global target.
++
++    ``preview_item_count`` is the explicit preview target.  The legacy
++    ``evaluation_item_count`` remains a fallback for older configurations.
++    A ceiling split avoids silently dropping a remainder when the target is
++    not divisible by the distributed world size.
++    """
++    target_global = int(
++        inference_config.get(
++            "preview_item_count",
++            inference_config.get("evaluation_item_count", dataset_length),
++        )
++    )
++    if target_global < 0:
++        raise ValueError("preview item count must be non-negative")
++    world_size = max(1, int(world_size))
++    target_per_rank = (target_global + world_size - 1) // world_size
++    return target_global, target_per_rank
++
++
+ def customize_text(clip_text, preview_config):
+ 
+     # text
+@@ -181,9 +202,75 @@ def main():  # ========= 你要的 main 函数 + debug 在这里 =========
+     export_batch_except = ["vae_images"]
+     output_path = args.output_path
+     global_step = 0
+-    
+-    
++
++    inference_config = config["pipeline"].get("inference_config", {})
++    preview_resume_enabled = bool(
++        inference_config.get("eval_frame_resume", False)
++    )
++    preview_resume_count = 0
++    preview_item_limit = None
++    if preview_resume_enabled:
++        if not hasattr(pipeline, "_prepare_eval_frame_resume"):
++            raise RuntimeError(
++                "eval_frame_resume=true requires a pipeline with "
++                "_prepare_eval_frame_resume()."
++            )
++        world_size = (
++            torch.distributed.get_world_size()
++            if torch.distributed.is_initialized()
++            else 1
++        )
++        preview_target_global, preview_item_limit = resolve_preview_item_limit(
++            inference_config,
++            len(validation_dataset),
++            world_size,
++        )
++        if should_log:
++            print(
++                "[PREVIEW_RESUME] target_global={} target_per_rank={} world_size={}".format(
++                    preview_target_global,
++                    preview_item_limit,
++                    world_size,
++                ),
++                flush=True,
++            )
++        loader_batch_size = preview_dataloader.batch_size
++        if loader_batch_size is None:
++            loader_batch_size = 1
++        preview_resume_count = pipeline._prepare_eval_frame_resume(
++            item_limit=preview_item_limit,
++            loader_batch_size=int(loader_batch_size),
++        )
++
++    seen_items = 0
+     for i, batch in enumerate(preview_dataloader):
++        batch_size = int(batch["vae_images"].shape[0])
++        batch_start = seen_items
++        batch_stop = batch_start + batch_size
++        seen_items = batch_stop
++
++        if (
++            preview_item_limit is not None
++            and batch_start >= preview_item_limit
++        ):
++            break
++
++        if preview_resume_enabled and batch_stop <= preview_resume_count:
++            continue
++
++        if preview_resume_enabled and batch_start < preview_resume_count:
++            raise RuntimeError(
++                "Preview resume point falls inside a dataloader batch: "
++                "batch_index={}, batch_range=[{}, {}), resume_count={}."
++                .format(
++                    i,
++                    batch_start,
++                    batch_stop,
++                    preview_resume_count,
++                )
++            )
++
++        output_step = batch_start if preview_resume_enabled else global_step
+         rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+         world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+ 
+@@ -236,14 +323,14 @@ def main():  # ========= 你要的 main 函数 + debug 在这里 =========
+             batch["clip_text"] = new_clip_text
+ 
+         pipeline.preview_pipeline(
+-            batch, output_path, global_step)
++            batch, output_path, output_step)
+ 
+         if args.export_item_config:
+             with open(
+                 os.path.join(
+                     output_path, "preview",
+                     "{}_rank{}.json".format(
+-                        global_step,
++                        output_step,
+                         torch.distributed.get_rank()
+                         if torch.distributed.is_initialized()
+                         else 0
+@@ -256,7 +343,7 @@ def main():  # ========= 你要的 main 函数 + debug 在这里 =========
+                     if k not in export_batch_except
+                 }, f, indent=4)
+ 
+-        global_step += 1
++        global_step = batch_stop if preview_resume_enabled else global_step + 1
+         if should_log:
+             print(f"preview: {global_step}")
+ 
+@@ -265,4 +352,4 @@ def main():  # ========= 你要的 main 函数 + debug 在这里 =========
+ 
+ 
+ if __name__ == "__main__":
+-    main()  # 统一入口
+\ No newline at end of file
++    main()  # 统一入口
+diff --git a/OpenDWM/src/dwm/utils/preview.py b/OpenDWM/src/dwm/utils/preview.py
+index a962b6a..2d5def4 100644
+--- a/OpenDWM/src/dwm/utils/preview.py
++++ b/OpenDWM/src/dwm/utils/preview.py
+@@ -3,6 +3,179 @@ import torch
+ import torchvision
+ import sys
+ import os
++import shutil
++import time
++
++
++def get_eval_frame_export_path(inference_config):
++    """Return the rank-aware eval-frame export directory.
++
++    This is shared by the legacy CTSD and BEV preview pipelines so resume
++    bookkeeping and frame export use the same directory convention.
++    """
++    eval_frame_export_path = inference_config.get("eval_frame_export_path")
++    if eval_frame_export_path is None:
++        return None
++
++    dist_on = (
++        torch.distributed.is_available()
++        and torch.distributed.is_initialized()
++    )
++    if dist_on and bool(inference_config.get("all_rank_preview", False)):
++        eval_frame_export_path = os.path.join(
++            eval_frame_export_path,
++            "rank_{:02d}".format(torch.distributed.get_rank()),
++        )
++    return eval_frame_export_path
++
++
++def get_eval_frame_manifest_path(inference_config):
++    export_path = get_eval_frame_export_path(inference_config)
++    if export_path is None:
++        return None
++    return os.path.join(
++        export_path,
++        inference_config.get("eval_frame_manifest_name", "stflow_manifest.jsonl"),
++    )
++
++
++def count_eval_manifest_items(path):
++    if not os.path.exists(path):
++        return 0
++    with open(path, "r", encoding="utf-8") as f:
++        return sum(1 for line in f if line.strip())
++
++
++def truncate_eval_manifest(path, keep_count):
++    if keep_count < 0:
++        raise ValueError("keep_count must be >= 0, got {}.".format(keep_count))
++    if not os.path.exists(path):
++        return
++
++    with open(path, "r", encoding="utf-8") as f:
++        lines = [line for line in f if line.strip()]
++    if len(lines) <= keep_count:
++        return
++
++    timestamp = time.strftime("%Y%m%d_%H%M%S")
++    backup_path = "{}.resume_backup_{}".format(path, timestamp)
++    shutil.copy2(path, backup_path)
++    tmp_path = "{}.resume_tmp".format(path)
++    with open(tmp_path, "w", encoding="utf-8") as f:
++        f.writelines(lines[:keep_count])
++    os.replace(tmp_path, path)
++
++    rank = torch.distributed.get_rank() if (
++        torch.distributed.is_available()
++        and torch.distributed.is_initialized()
++    ) else 0
++    print(
++        "[EVAL_FRAME_RESUME] rank={} truncated manifest from {} to {}; backup={}".format(
++            rank, len(lines), keep_count, backup_path
++        ),
++        flush=True,
++    )
++
++
++def compute_eval_frame_resume_count(rank_counts, item_limit, loader_batch_size):
++    """Compute the shared committed prefix for one or more ranks."""
++    if not rank_counts:
++        raise ValueError("rank_counts must not be empty")
++    if loader_batch_size <= 0:
++        raise ValueError(
++            "Invalid validation batch size: {}.".format(loader_batch_size)
++        )
++    common_count = min(int(value) for value in rank_counts)
++    if common_count >= int(item_limit):
++        return int(item_limit)
++    return (common_count // int(loader_batch_size)) * int(loader_batch_size)
++
++
++def prepare_eval_frame_resume(
++    inference_config,
++    device,
++    item_limit,
++    loader_batch_size,
++):
++    """Prepare a rank-aware manifest prefix for resumable preview export.
++
++    The algorithm intentionally matches the long-standing BEVPVEpi behavior:
++    use the minimum committed count across ranks, rewind to a batch boundary,
++    truncate uneven manifests, and synchronize before generation resumes.
++    """
++    if not bool(inference_config.get("eval_frame_resume", False)):
++        return 0
++
++    manifest_path = get_eval_frame_manifest_path(inference_config)
++    if manifest_path is None:
++        raise ValueError(
++            "eval_frame_resume=true requires inference_config.eval_frame_export_path."
++        )
++
++    dist_on = (
++        torch.distributed.is_available()
++        and torch.distributed.is_initialized()
++    )
++    if dist_on and not bool(inference_config.get("all_rank_preview", False)):
++        raise ValueError(
++            "Distributed eval-frame resume requires all_rank_preview=true "
++            "so every rank has its own manifest."
++        )
++
++    local_count = count_eval_manifest_items(manifest_path)
++    rank = torch.distributed.get_rank() if dist_on else 0
++    if dist_on:
++        local_count_tensor = torch.tensor([local_count], device=device, dtype=torch.long)
++        gathered = [
++            torch.zeros_like(local_count_tensor)
++            for _ in range(torch.distributed.get_world_size())
++        ]
++        torch.distributed.all_gather(gathered, local_count_tensor)
++        rank_counts = [int(value.item()) for value in gathered]
++    else:
++        rank_counts = [local_count]
++
++    common_count = min(rank_counts)
++    if rank == 0:
++        print(
++            "[EVAL_FRAME_RESUME] rank_counts={} common_count={} item_limit_per_rank={}".format(
++                rank_counts, common_count, item_limit
++            ),
++            flush=True,
++        )
++
++    if common_count >= item_limit:
++        if rank == 0:
++            print(
++                "[EVAL_FRAME_RESUME] requested preview is already complete; no generation is needed.",
++                flush=True,
++            )
++        return item_limit
++
++    resume_count = compute_eval_frame_resume_count(
++        rank_counts,
++        item_limit,
++        loader_batch_size,
++    )
++    if rank == 0 and resume_count != common_count:
++        print(
++            "[EVAL_FRAME_RESUME] rewind common_count={} to batch boundary resume_count={} for batch_size={}.".format(
++                common_count, resume_count, loader_batch_size
++            ),
++            flush=True,
++        )
++
++    if local_count > resume_count:
++        truncate_eval_manifest(manifest_path, resume_count)
++    if dist_on:
++        torch.distributed.barrier()
++
++    if resume_count > 0 and rank == 0:
++        print(
++            "[EVAL_FRAME_RESUME] WARNING: in-process metrics cover only newly generated samples after resume.",
++            flush=True,
++        )
++    return resume_count
+ 
+ def _get_preview_view_count_from_batch(batch: dict, default_view_count: int) -> int:
+     """
+diff --git a/lyh_bash/nuplanpvbevepipolarpreview.sh b/lyh_bash/nuplanpvbevepipolarpreview.sh
+old mode 100644
+new mode 100755
+index 879dc8a..a08eb3e
+--- a/lyh_bash/nuplanpvbevepipolarpreview.sh
++++ b/lyh_bash/nuplanpvbevepipolarpreview.sh
+@@ -1,24 +1,58 @@
++#!/usr/bin/env bash
++
++PROJECT_ROOT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM"
++
++CONFIG_PATH="${PROJECT_ROOT}/configs/lyh/bev_pv_epipolarpreview.json"
++
++OUTPUT_PATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/debug_bevpvepi"
++
++
++# 启智外层 shell 可能启用了 nounset。
++# conda/venv activate 脚本内部会访问尚未定义的 CONDA_PREFIX，
++# 所以 source 前必须关闭 nounset。
++set +u
++
+ source /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin/activate
+-cd /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/src
++
++
++cd "${PROJECT_ROOT}/src" || exit 1
++
+ 
+ export CUDA_VISIBLE_DEVICES=0,1,2,3
++
+ export OMP_NUM_THREADS=1
+ export TOKENIZERS_PARALLELISM=false
+-
+ export ENABLE_DEBUGPY=0
+ 
++export OPENDWM_ROOT="${PROJECT_ROOT}"
+ 
+-export OPENDWM_ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM
+ export CAMSIM_ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim
+ 
+-export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
+-export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/externals/TATS/tats/fvd:$PYTHONPATH"
+-export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/nuplan-devkit-master:$PYTHONPATH"
+-export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/externals/waymo-open-dataset/src:$PYTHONPATH"
+ 
+-torchrun \
++export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
++
++export PYTHONPATH="${PROJECT_ROOT}/externals/TATS/tats/fvd:${PYTHONPATH}"
++
++export PYTHONPATH="${CAMSIM_ROOT}/nuplan-devkit-master:${PYTHONPATH}"
++
++export PYTHONPATH="${PROJECT_ROOT}/externals/waymo-open-dataset/src:${PYTHONPATH}"
++
++
++echo "============================================================"
++echo "PREVIEW START"
++echo "============================================================"
++echo "python              = $(which python)"
++echo "torchrun            = $(which torchrun)"
++echo "project             = ${PROJECT_ROOT}"
++echo "config              = ${CONFIG_PATH}"
++echo "output              = ${OUTPUT_PATH}"
++echo "CUDA_VISIBLE_DEVICES= ${CUDA_VISIBLE_DEVICES}"
++echo "============================================================"
++
++
++exec torchrun \
+   --standalone \
+   --nproc_per_node=4 \
+   -m dwm.preview \
+-  -c "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/configs/lyh/bev_pv_epipolarpreview.json" \
+-  -o "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/debug_bevpvepi"
+\ No newline at end of file
++  -c "${CONFIG_PATH}" \
++  -o "${OUTPUT_PATH}"
+\ No newline at end of file
