@@ -2862,6 +2862,19 @@ class CrossviewTemporalSD():
 
         return result
 
+    def _prepare_eval_frame_resume(
+        self,
+        item_limit: int,
+        loader_batch_size: int,
+    ) -> int:
+        """Use the shared BEVPVEpi-compatible manifest resume logic."""
+        return dwm.utils.preview.prepare_eval_frame_resume(
+            inference_config=self.inference_config,
+            device=self.device,
+            item_limit=item_limit,
+            loader_batch_size=loader_batch_size,
+        )
+
     @torch.no_grad()
     def preview_pipeline(
         self, batch: dict, output_path: str, global_step: int

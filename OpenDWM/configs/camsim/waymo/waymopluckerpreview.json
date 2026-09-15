@@ -868,7 +868,7 @@
                     "info_dict_path": "/inspire/qb-ilm/project/advanced-machine-learning/yanjunchi-24040/camsim_lyh/waymo_balanced/validation.info.json",
                     "sequence_length": 19,
                     "fps_stride_tuples": [
-                        [6,9]
+                        [6,3]
                     ],
                     "sensor_channels": [
                         "LIDAR_TOP",

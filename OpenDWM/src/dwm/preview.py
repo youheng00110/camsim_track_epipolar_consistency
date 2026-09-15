@@ -20,6 +20,27 @@ import torch
 import dwm.common
 
 
+def resolve_preview_item_limit(inference_config, dataset_length, world_size=1):
+    """Resolve the per-rank preview limit from a global target.
+
+    ``preview_item_count`` is the explicit preview target.  The legacy
+    ``evaluation_item_count`` remains a fallback for older configurations.
+    A ceiling split avoids silently dropping a remainder when the target is
+    not divisible by the distributed world size.
+    """
+    target_global = int(
+        inference_config.get(
+            "preview_item_count",
+            inference_config.get("evaluation_item_count", dataset_length),
+        )
+    )
+    if target_global < 0:
+        raise ValueError("preview item count must be non-negative")
+    world_size = max(1, int(world_size))
+    target_per_rank = (target_global + world_size - 1) // world_size
+    return target_global, target_per_rank
+
+
 def customize_text(clip_text, preview_config):
 
     # text
@@ -181,9 +202,75 @@ def main():  # ========= 你要的 main 函数 + debug 在这里 =========
     export_batch_except = ["vae_images"]
     output_path = args.output_path
     global_step = 0
-    
-    
+
+    inference_config = config["pipeline"].get("inference_config", {})
+    preview_resume_enabled = bool(
+        inference_config.get("eval_frame_resume", False)
+    )
+    preview_resume_count = 0
+    preview_item_limit = None
+    if preview_resume_enabled:
+        if not hasattr(pipeline, "_prepare_eval_frame_resume"):
+            raise RuntimeError(
+                "eval_frame_resume=true requires a pipeline with "
+                "_prepare_eval_frame_resume()."
+            )
+        world_size = (
+            torch.distributed.get_world_size()
+            if torch.distributed.is_initialized()
+            else 1
+        )
+        preview_target_global, preview_item_limit = resolve_preview_item_limit(
+            inference_config,
+            len(validation_dataset),
+            world_size,
+        )
+        if should_log:
+            print(
+                "[PREVIEW_RESUME] target_global={} target_per_rank={} world_size={}".format(
+                    preview_target_global,
+                    preview_item_limit,
+                    world_size,
+                ),
+                flush=True,
+            )
+        loader_batch_size = preview_dataloader.batch_size
+        if loader_batch_size is None:
+            loader_batch_size = 1
+        preview_resume_count = pipeline._prepare_eval_frame_resume(
+            item_limit=preview_item_limit,
+            loader_batch_size=int(loader_batch_size),
+        )
+
+    seen_items = 0
     for i, batch in enumerate(preview_dataloader):
+        batch_size = int(batch["vae_images"].shape[0])
+        batch_start = seen_items
+        batch_stop = batch_start + batch_size
+        seen_items = batch_stop
+
+        if (
+            preview_item_limit is not None
+            and batch_start >= preview_item_limit
+        ):
+            break
+
+        if preview_resume_enabled and batch_stop <= preview_resume_count:
+            continue
+
+        if preview_resume_enabled and batch_start < preview_resume_count:
+            raise RuntimeError(
+                "Preview resume point falls inside a dataloader batch: "
+                "batch_index={}, batch_range=[{}, {}), resume_count={}."
+                .format(
+                    i,
+                    batch_start,
+                    batch_stop,
+                    preview_resume_count,
+                )
+            )
+
+        output_step = batch_start if preview_resume_enabled else global_step
         rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
         world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
 
@@ -236,14 +323,14 @@ def main():  # ========= 你要的 main 函数 + debug 在这里 =========
             batch["clip_text"] = new_clip_text
 
         pipeline.preview_pipeline(
-            batch, output_path, global_step)
+            batch, output_path, output_step)
 
         if args.export_item_config:
             with open(
                 os.path.join(
                     output_path, "preview",
                     "{}_rank{}.json".format(
-                        global_step,
+                        output_step,
                         torch.distributed.get_rank()
                         if torch.distributed.is_initialized()
                         else 0
@@ -256,7 +343,7 @@ def main():  # ========= 你要的 main 函数 + debug 在这里 =========
                     if k not in export_batch_except
                 }, f, indent=4)
 
-        global_step += 1
+        global_step = batch_stop if preview_resume_enabled else global_step + 1
         if should_log:
             print(f"preview: {global_step}")
 

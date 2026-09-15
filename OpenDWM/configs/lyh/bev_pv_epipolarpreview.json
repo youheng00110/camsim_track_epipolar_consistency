@@ -99,12 +99,12 @@
                 "crossview_mask",
                 "view_consistency_pair_mask"
             ],
-            "evaluation_item_count": 480,
             "eval_frame_export_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/nuplanhard1000/bev_pv_epipolar",
             "eval_frame_dataset_name": "nuplan",
             "eval_frame_manifest_name": "stflow_manifest.jsonl",
             "eval_frame_image_quality": 95,
             "eval_frame_export_paired_real": true,
+            "eval_frame_resume": true,
             "all_rank_preview": true,
             "eval_frame_export_box_image": true,
             "eval_frame_export_box_params": true,

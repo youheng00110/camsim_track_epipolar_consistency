@@ -3,6 +3,179 @@ import torch
 import torchvision
 import sys
 import os
+import shutil
+import time
+
+
+def get_eval_frame_export_path(inference_config):
+    """Return the rank-aware eval-frame export directory.
+
+    This is shared by the legacy CTSD and BEV preview pipelines so resume
+    bookkeeping and frame export use the same directory convention.
+    """
+    eval_frame_export_path = inference_config.get("eval_frame_export_path")
+    if eval_frame_export_path is None:
+        return None
+
+    dist_on = (
+        torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+    )
+    if dist_on and bool(inference_config.get("all_rank_preview", False)):
+        eval_frame_export_path = os.path.join(
+            eval_frame_export_path,
+            "rank_{:02d}".format(torch.distributed.get_rank()),
+        )
+    return eval_frame_export_path
+
+
+def get_eval_frame_manifest_path(inference_config):
+    export_path = get_eval_frame_export_path(inference_config)
+    if export_path is None:
+        return None
+    return os.path.join(
+        export_path,
+        inference_config.get("eval_frame_manifest_name", "stflow_manifest.jsonl"),
+    )
+
+
+def count_eval_manifest_items(path):
+    if not os.path.exists(path):
+        return 0
+    with open(path, "r", encoding="utf-8") as f:
+        return sum(1 for line in f if line.strip())
+
+
+def truncate_eval_manifest(path, keep_count):
+    if keep_count < 0:
+        raise ValueError("keep_count must be >= 0, got {}.".format(keep_count))
+    if not os.path.exists(path):
+        return
+
+    with open(path, "r", encoding="utf-8") as f:
+        lines = [line for line in f if line.strip()]
+    if len(lines) <= keep_count:
+        return
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    backup_path = "{}.resume_backup_{}".format(path, timestamp)
+    shutil.copy2(path, backup_path)
+    tmp_path = "{}.resume_tmp".format(path)
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.writelines(lines[:keep_count])
+    os.replace(tmp_path, path)
+
+    rank = torch.distributed.get_rank() if (
+        torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+    ) else 0
+    print(
+        "[EVAL_FRAME_RESUME] rank={} truncated manifest from {} to {}; backup={}".format(
+            rank, len(lines), keep_count, backup_path
+        ),
+        flush=True,
+    )
+
+
+def compute_eval_frame_resume_count(rank_counts, item_limit, loader_batch_size):
+    """Compute the shared committed prefix for one or more ranks."""
+    if not rank_counts:
+        raise ValueError("rank_counts must not be empty")
+    if loader_batch_size <= 0:
+        raise ValueError(
+            "Invalid validation batch size: {}.".format(loader_batch_size)
+        )
+    common_count = min(int(value) for value in rank_counts)
+    if common_count >= int(item_limit):
+        return int(item_limit)
+    return (common_count // int(loader_batch_size)) * int(loader_batch_size)
+
+
+def prepare_eval_frame_resume(
+    inference_config,
+    device,
+    item_limit,
+    loader_batch_size,
+):
+    """Prepare a rank-aware manifest prefix for resumable preview export.
+
+    The algorithm intentionally matches the long-standing BEVPVEpi behavior:
+    use the minimum committed count across ranks, rewind to a batch boundary,
+    truncate uneven manifests, and synchronize before generation resumes.
+    """
+    if not bool(inference_config.get("eval_frame_resume", False)):
+        return 0
+
+    manifest_path = get_eval_frame_manifest_path(inference_config)
+    if manifest_path is None:
+        raise ValueError(
+            "eval_frame_resume=true requires inference_config.eval_frame_export_path."
+        )
+
+    dist_on = (
+        torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+    )
+    if dist_on and not bool(inference_config.get("all_rank_preview", False)):
+        raise ValueError(
+            "Distributed eval-frame resume requires all_rank_preview=true "
+            "so every rank has its own manifest."
+        )
+
+    local_count = count_eval_manifest_items(manifest_path)
+    rank = torch.distributed.get_rank() if dist_on else 0
+    if dist_on:
+        local_count_tensor = torch.tensor([local_count], device=device, dtype=torch.long)
+        gathered = [
+            torch.zeros_like(local_count_tensor)
+            for _ in range(torch.distributed.get_world_size())
+        ]
+        torch.distributed.all_gather(gathered, local_count_tensor)
+        rank_counts = [int(value.item()) for value in gathered]
+    else:
+        rank_counts = [local_count]
+
+    common_count = min(rank_counts)
+    if rank == 0:
+        print(
+            "[EVAL_FRAME_RESUME] rank_counts={} common_count={} item_limit_per_rank={}".format(
+                rank_counts, common_count, item_limit
+            ),
+            flush=True,
+        )
+
+    if common_count >= item_limit:
+        if rank == 0:
+            print(
+                "[EVAL_FRAME_RESUME] requested preview is already complete; no generation is needed.",
+                flush=True,
+            )
+        return item_limit
+
+    resume_count = compute_eval_frame_resume_count(
+        rank_counts,
+        item_limit,
+        loader_batch_size,
+    )
+    if rank == 0 and resume_count != common_count:
+        print(
+            "[EVAL_FRAME_RESUME] rewind common_count={} to batch boundary resume_count={} for batch_size={}.".format(
+                common_count, resume_count, loader_batch_size
+            ),
+            flush=True,
+        )
+
+    if local_count > resume_count:
+        truncate_eval_manifest(manifest_path, resume_count)
+    if dist_on:
+        torch.distributed.barrier()
+
+    if resume_count > 0 and rank == 0:
+        print(
+            "[EVAL_FRAME_RESUME] WARNING: in-process metrics cover only newly generated samples after resume.",
+            flush=True,
+        )
+    return resume_count
 
 def _get_preview_view_count_from_batch(batch: dict, default_view_count: int) -> int:
     """
