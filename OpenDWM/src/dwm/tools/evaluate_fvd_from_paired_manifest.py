@@ -22,6 +22,11 @@ def create_parser():
     parser.add_argument("--sequence-count", type=int, default=35)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--camera-names", type=str, default=None)
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable incremental progress loading and saving.",
+    )
     return parser
 
 
@@ -119,8 +124,79 @@ def update_metric(metric, manifest_dir, batch_specs, sequence_count, device):
 def write_json(output_path, data):
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with open(temporary, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temporary, path)
+
+
+FVD_STATE_NAMES = (
+    "real_features_sum",
+    "real_features_cov_sum",
+    "real_features_num_samples",
+    "fake_features_sum",
+    "fake_features_cov_sum",
+    "fake_features_num_samples",
+)
+
+
+def _fvd_signature(args, manifest_path, camera_names, num_samples):
+    return {
+        "manifest": str(manifest_path.resolve()),
+        "i3d_checkpoint": str(Path(args.i3d_checkpoint).resolve()),
+        "camera_names": list(camera_names),
+        "sequence_count": args.sequence_count,
+        "batch_size": args.batch_size,
+        "num_samples": num_samples,
+    }
+
+
+def _metric_state(metric):
+    # FrechetVideoDistance uses these six add_state() tensors as its complete
+    # accumulated statistic. Saving them explicitly avoids relying on the
+    # torchmetrics state_dict implementation to preserve custom metric state.
+    return {
+        name: getattr(metric, name).detach().cpu().clone()
+        for name in FVD_STATE_NAMES
+    }
+
+
+def _restore_metric_state(metric, state):
+    missing = [name for name in FVD_STATE_NAMES if name not in state]
+    if missing:
+        raise RuntimeError(f"FVD progress is missing metric state: {missing}")
+    for name in FVD_STATE_NAMES:
+        target = getattr(metric, name)
+        value = state[name]
+        if tuple(value.shape) != tuple(target.shape):
+            raise RuntimeError(
+                f"FVD metric state shape mismatch for {name}: "
+                f"{tuple(value.shape)} vs {tuple(target.shape)}"
+            )
+        target.copy_(value.to(device=target.device, dtype=target.dtype))
+
+
+def _atomic_torch_save(path, data):
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("wb") as handle:
+        torch.save(data, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def _load_fvd_progress(path, signature):
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    if checkpoint.get("signature") != signature:
+        raise RuntimeError(
+            "FVD progress does not match the manifest/camera/eval configuration."
+        )
+    next_start = checkpoint.get("next_start")
+    if not isinstance(next_start, int) or next_start < 0:
+        raise RuntimeError(f"Invalid FVD progress next_start: {next_start!r}")
+    return next_start, checkpoint.get("metric_state", {})
 
 
 def main():
@@ -154,7 +230,32 @@ def main():
     print("[paired-fvd] cameras:", camera_names)
     print("[paired-fvd] total samples:", len(sample_specs))
 
-    for start in range(0, len(sample_specs), args.batch_size):
+    progress_path = Path(args.output).with_suffix(Path(args.output).suffix + ".progress.pt")
+    signature = _fvd_signature(
+        args,
+        Path(args.manifest),
+        camera_names,
+        len(sample_specs),
+    )
+    next_start = 0
+    if args.no_resume:
+        print("[RESUME] disabled; starting fresh")
+    elif progress_path.is_file():
+        next_start, saved_state = _load_fvd_progress(progress_path, signature)
+        if next_start > len(sample_specs):
+            raise RuntimeError(
+                f"FVD progress next_start {next_start} exceeds "
+                f"sample count {len(sample_specs)}"
+            )
+        _restore_metric_state(metric, saved_state)
+        print(
+            f"[RESUME] completed {next_start}/{len(sample_specs)} "
+            f"from {progress_path}"
+        )
+    else:
+        print("[RESUME] starting fresh")
+
+    for start in range(next_start, len(sample_specs), args.batch_size):
         end = min(start + args.batch_size, len(sample_specs))
         update_metric(
             metric,
@@ -163,6 +264,20 @@ def main():
             args.sequence_count,
             device,
         )
+        if not args.no_resume:
+            _atomic_torch_save(
+                progress_path,
+                {
+                    "next_start": end,
+                    "metric_state": _metric_state(metric),
+                    "signature": signature,
+                    "manifest": signature["manifest"],
+                    "camera_names": signature["camera_names"],
+                    "sequence_count": signature["sequence_count"],
+                    "batch_size": signature["batch_size"],
+                    "num_samples": signature["num_samples"],
+                },
+            )
         print(f"[paired-fvd] processed samples {end}/{len(sample_specs)}", flush=True)
 
     with torch.no_grad():

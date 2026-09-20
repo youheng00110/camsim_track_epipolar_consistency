@@ -67,7 +67,7 @@
             "view_consistency_enable_crossview": true,
             "view_consistency_enable_crossframe": true,
             "view_consistency_crossframe_stride": 1,
-            "view_consistency_max_sigma": 0.5,
+            "view_consistency_max_sigma": 0.7,
             "view_consistency_max_foreground_patches": 128,
             "view_consistency_max_background_patches": 128,
             "view_consistency_min_patches": 4,

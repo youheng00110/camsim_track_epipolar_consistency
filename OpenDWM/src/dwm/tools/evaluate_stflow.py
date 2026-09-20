@@ -89,6 +89,11 @@ def create_parser():
         default=12.0,
         help="Epipolar gate threshold in pixels for cross-view LoFTR matches.",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable incremental progress loading and saving.",
+    )
     return parser
 
 
@@ -218,6 +223,82 @@ def aggregate_video_results(video_results):
     return output
 
 
+def _stflow_resume_signature(args, manifest_path):
+    return {
+        "manifest": str(manifest_path.resolve()),
+        "max_videos": args.max_videos,
+        "frame_stride": args.frame_stride,
+        "start_frame": args.start_frame,
+        "min_matches": args.min_matches,
+        "max_matches": args.max_matches,
+        "loftr_confidence": args.loftr_confidence,
+        "camera_pairs": args.camera_pairs,
+        "pair_policy": args.pair_policy,
+        "cross_gate_px": args.cross_gate_px,
+    }
+
+
+def _load_stflow_progress(progress_path, signature, manifest_items):
+    if not progress_path.is_file():
+        return {}
+
+    completed = {}
+    metadata_seen = False
+    with progress_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                # A killed process may leave a partial final JSON line.
+                continue
+            if "_meta" in record:
+                if metadata_seen and record["_meta"] != signature:
+                    raise RuntimeError(
+                        f"Conflicting ST-Flow progress metadata at line {line_number}."
+                    )
+                if record["_meta"] != signature:
+                    raise RuntimeError(
+                        "ST-Flow progress does not match the manifest/eval configuration."
+                    )
+                metadata_seen = True
+                continue
+            if not {"index", "video_id", "result"}.issubset(record):
+                continue
+            index = record["index"]
+            if not isinstance(index, int) or not 0 <= index < len(manifest_items):
+                raise RuntimeError(f"Invalid ST-Flow progress index: {index!r}")
+            if record["video_id"] != manifest_items[index].get("video_id", ""):
+                raise RuntimeError(
+                    f"ST-Flow progress video mismatch at index {index}: "
+                    f"{record['video_id']!r} vs {manifest_items[index].get('video_id', '')!r}."
+                )
+            completed[index] = record["result"]
+
+    if not metadata_seen:
+        raise RuntimeError(
+            f"ST-Flow progress file has no compatible metadata: {progress_path}"
+        )
+    return completed
+
+
+def _append_stflow_progress(progress_path, record):
+    with progress_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _atomic_json_dump(path, data):
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2, ensure_ascii=False)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
 def main():
     parser = create_parser()
     args = parser.parse_args()
@@ -242,16 +323,51 @@ def main():
     manifest_items = load_manifest_items(args.manifest, args.max_videos)
     print(f"[stflow] Loaded {len(manifest_items)} videos from {args.manifest}")
 
+    progress_path = output_path.with_suffix(output_path.suffix + ".progress.jsonl")
+    signature = _stflow_resume_signature(args, manifest_path)
+    completed = {}
+    if args.no_resume:
+        print("[RESUME] disabled; starting fresh")
+    else:
+        completed = _load_stflow_progress(
+            progress_path,
+            signature,
+            manifest_items,
+        ) if progress_path.is_file() else {}
+        if completed:
+            print(
+                f"[RESUME] completed {len(completed)}/{len(manifest_items)} "
+                f"from {progress_path}"
+            )
+        else:
+            print("[RESUME] starting fresh")
+
+        if not progress_path.is_file():
+            _append_stflow_progress(progress_path, {"_meta": signature})
+
     video_results = []
     for index, item in enumerate(manifest_items):
+        if index in completed:
+            video_results.append(completed[index])
+            continue
         with torch.no_grad():
             result = evaluator.evaluate_video(item, manifest_dir)
             result = add_coverage_score(result)
 
+        completed[index] = result
         video_results.append(result)
+        if not args.no_resume:
+            _append_stflow_progress(
+                progress_path,
+                {
+                    "index": index,
+                    "video_id": item.get("video_id", ""),
+                    "result": result,
+                },
+            )
         print(
             "[stflow] {}/{} {} | dscore={:.3f} cscore={:.3f} score={:.3f} temp={:.5f} cross={:.3f} cycle={:.3f}".format(
-                index + 1,
+                len(completed),
                 len(manifest_items),
                 result.get("video_id", ""),
                 result.get("stflow_d_score", float("nan")),
@@ -263,6 +379,7 @@ def main():
             )
         )
 
+    video_results = [completed[index] for index in sorted(completed)]
     output = aggregate_video_results(video_results)
     output["eval_config"] = {
         "frame_stride": args.frame_stride,
@@ -274,8 +391,7 @@ def main():
         "cross_gate_px": args.cross_gate_px,
     }
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
+    _atomic_json_dump(output_path, output)
 
     print(f"[stflow] Saved result to {output_path}")
     print(json.dumps(output["mean"], indent=2, ensure_ascii=False))

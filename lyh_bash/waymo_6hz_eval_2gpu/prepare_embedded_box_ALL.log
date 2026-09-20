@@ -1,0 +1,192 @@
+
+====================================================================================================
+1. CHECK EXISTING MERGED MANIFESTS
+====================================================================================================
+
+METHOD=pvonly_6hz
+MANIFEST=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/pvonly_6hz_merged1000/stflow_manifest.jsonl
+lines=1000
+
+METHOD=nocondition_6hz
+MANIFEST=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/nocondition_6hz_merged1000/stflow_manifest.jsonl
+lines=1000
+
+METHOD=plucker_6hz
+MANIFEST=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/plucker_6hz_merged1000/stflow_manifest.jsonl
+lines=1000
+
+====================================================================================================
+2. CHECK EMBEDDED boxes_3d
+====================================================================================================
+
+====================================================================================================
+pvonly_6hz
+====================================================================================================
+videos            = 1000
+frames            = 19000
+frames_with_boxes = 19000
+boxes             = 843359
+classes           = {'VEHICLE': 595456, 'PEDESTRIAN': 241777, 'CYCLIST': 6126}
+
+EXAMPLE
+video_id         = waymo_video_000000
+frame            = 0
+gt_id            = 7b28J_lykfwB4eDRiq4a6g
+class_name       = VEHICLE
+coordinate_frame = reference_ego
+corners_ref len  = 8
+corners_ref[0]   = [-19.46388816833496, 2.6148571968078613, -0.04523921012878418]
+
+====================================================================================================
+nocondition_6hz
+====================================================================================================
+videos            = 1000
+frames            = 19000
+frames_with_boxes = 19000
+boxes             = 843359
+classes           = {'VEHICLE': 595456, 'PEDESTRIAN': 241777, 'CYCLIST': 6126}
+
+EXAMPLE
+video_id         = waymo_video_000000
+frame            = 0
+gt_id            = 7b28J_lykfwB4eDRiq4a6g
+class_name       = VEHICLE
+coordinate_frame = reference_ego
+corners_ref len  = 8
+corners_ref[0]   = [-19.46388816833496, 2.6148571968078613, -0.04523921012878418]
+
+====================================================================================================
+plucker_6hz
+====================================================================================================
+videos            = 1000
+frames            = 19000
+frames_with_boxes = 19000
+boxes             = 843359
+classes           = {'VEHICLE': 595456, 'PEDESTRIAN': 241777, 'CYCLIST': 6126}
+
+EXAMPLE
+video_id         = waymo_video_000000
+frame            = 0
+gt_id            = 7b28J_lykfwB4eDRiq4a6g
+class_name       = VEHICLE
+coordinate_frame = reference_ego
+corners_ref len  = 8
+corners_ref[0]   = [-19.46388816833496, 2.6148571968078613, -0.04523921012878418]
+
+====================================================================================================
+3. SEARCH SAM3 SOURCE FOR INLINE BOX SUPPORT
+====================================================================================================
+
+--- boxes_3d ---
+
+--- corners_ref ---
+
+--- shared_box_root / box_manifest ---
+
+====================================================================================================
+4. FIND EXISTING YAML CANDIDATES
+====================================================================================================
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_bevbase_box1000.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_bevbase_box3d_1000.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_dwm300_pairedreal.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_nuplan_box300.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_nuscenes_ori3_box3d_full.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_nuscenes_ori3_box3d_test32.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_nuscenes_ori6_front3_full.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_nuscenes_ori6_front3_full_1gpu.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_nuscenes_ori6_front3_pairedreal_1gpu.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_shared_box_4cam.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_shared_box_nuplan.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/config_shared_box_nuplan_test.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_box.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_full.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_implicit.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_nocondition.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_petr.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_plucker.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_pluckernew.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_pvonly.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_token18000.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_token24000.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_tvself.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/generated_urope.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/configs_nuplan1000_box3d/pairedreal_implicit.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/.github/workflows/format.yml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/eval_base.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/gold_image_evals/sam3_gold_image_attributes.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/gold_image_evals/sam3_gold_image_crowded.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/gold_image_evals/sam3_gold_image_fg_food.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/gold_image_evals/sam3_gold_image_fg_sports.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/gold_image_evals/sam3_gold_image_metaclip_nps.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/gold_image_evals/sam3_gold_image_sa1b_nps.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/gold_image_evals/sam3_gold_image_wiki_common.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/odinw13/odinw_text_and_visual.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/odinw13/odinw_text_only.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/odinw13/odinw_text_only_positive.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/odinw13/odinw_text_only_train.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/odinw13/odinw_visual_only.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/roboflow_v100/roboflow_v100_eval.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/roboflow_v100/roboflow_v100_full_ft_100_images.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_sav_test.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_sav_test_noheur.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_sav_val.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_sav_val_noheur.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_smartglasses_test.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_smartglasses_test_noheur.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_smartglasses_val.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_smartglasses_val_noheur.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_yt1b_test.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_yt1b_test_noheur.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_yt1b_val.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/saco_video_evals/saco_veval_yt1b_val_noheur.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_bdd100k.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_droid.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_ego4d.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_fathomnet.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_food_rec.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_geode.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_inaturalist.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_nga.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_sav.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3/sam3/train/configs/silver_image_evals/sam3_silver_image_yt1b.yaml
+
+
+--- YAMLs containing waymo ---
+WAYMO_TEMPLATE=
+
+====================================================================================================
+5. GENERATE THREE YAMLs WHEN TEMPLATE EXISTS
+====================================================================================================
+
+[WARNING] No existing Waymo YAML template found.
+This is NOT fatal.
+All candidates are saved in:
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_bash/waymo_6hz_eval_2gpu/all_yaml_candidates.txt
+
+====================================================================================================
+6. CREATE SCAN SCRIPT NO MATTER WHAT
+====================================================================================================
+
+====================================================================================================
+7. FINAL FILE STATUS
+====================================================================================================
+
+scan script:
+-rwxr-xr-x 1 root root 2.7K Sep 16 21:25 /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_bash/waymo_6hz_eval_2gpu/scan_waymo_embedded_boxes.sh
+
+generated YAMLs:
+[MISSING] /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/configs/pvonly_6hz.yaml
+[MISSING] /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/configs/nocondition_6hz.yaml
+[MISSING] /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/configs/plucker_6hz.yaml
+
+====================================================================================================
+PREPARATION FINISHED
+====================================================================================================
+
+Nothing above intentionally exits on SAM/YAML errors.
+
+Next command:
+
+bash -x /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_bash/waymo_6hz_eval_2gpu/scan_waymo_embedded_boxes.sh 2>&1 | tee /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_bash/waymo_6hz_eval_2gpu/scan_waymo_embedded_boxes_FULL.log
+

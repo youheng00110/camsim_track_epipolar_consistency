@@ -1,0 +1,129 @@
++ set +e
++ set +u
++ source /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin/activate
+++ _conda_pack_activate
+++ local _CONDA_SHELL_FLAVOR
+++ '[' -n x ']'
+++ _CONDA_SHELL_FLAVOR=bash
+++ local script_dir
+++ case "$_CONDA_SHELL_FLAVOR" in
++++ dirname /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin/activate
+++ script_dir=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin
++++ cd /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin
++++ pwd
+++ local full_path_script_dir=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin
++++ dirname /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin
+++ local full_path_env=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm
++++ basename /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm
+++ local env_name=lyhdwm
+++ '[' -n /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm ']'
+++ '[' /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm '!=' /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm ']'
+++ return 0
++ CAMSIM_ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim
++ WAYMO_ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo
++ SAM3_ROOT=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval
++ export PYTHONUNBUFFERED=1
++ PYTHONUNBUFFERED=1
++ export PYTHONPATH=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3:
++ PYTHONPATH=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval/sam3:
++ export 'PS4=+ [${BASH_SOURCE##*/}:${LINENO}] '
++ PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
++ [scan_waymo_embedded_boxes.sh:22] cd /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/sam3-eval/sam3-eval
++ [scan_waymo_embedded_boxes.sh:27] echo
+
++ [scan_waymo_embedded_boxes.sh:28] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:29] echo 'SAM3 EMBEDDED BOX SCAN'
+SAM3 EMBEDDED BOX SCAN
++ [scan_waymo_embedded_boxes.sh:30] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:33] for METHOD in pvonly_6hz nocondition_6hz plucker_6hz
++ [scan_waymo_embedded_boxes.sh:39] CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/configs/pvonly_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:41] LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/scan_embedded_boxes.log
++ [scan_waymo_embedded_boxes.sh:44] echo
+
++ [scan_waymo_embedded_boxes.sh:45] echo
+
++ [scan_waymo_embedded_boxes.sh:46] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:47] echo METHOD=pvonly_6hz
+METHOD=pvonly_6hz
++ [scan_waymo_embedded_boxes.sh:48] echo CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/configs/pvonly_6hz.yaml
+CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/configs/pvonly_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:49] echo LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/scan_embedded_boxes.log
+LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/scan_embedded_boxes.log
++ [scan_waymo_embedded_boxes.sh:50] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:53] '[' '!' -f /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/configs/pvonly_6hz.yaml ']'
++ [scan_waymo_embedded_boxes.sh:55] echo '[MISSING CONFIG]'
+[MISSING CONFIG]
++ [scan_waymo_embedded_boxes.sh:56] echo /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/configs/pvonly_6hz.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_pvonly_6hz_merged1000_box/configs/pvonly_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:57] echo 'CONTINUE TO NEXT METHOD'
+CONTINUE TO NEXT METHOD
++ [scan_waymo_embedded_boxes.sh:59] continue
++ [scan_waymo_embedded_boxes.sh:33] for METHOD in pvonly_6hz nocondition_6hz plucker_6hz
++ [scan_waymo_embedded_boxes.sh:39] CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/configs/nocondition_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:41] LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/scan_embedded_boxes.log
++ [scan_waymo_embedded_boxes.sh:44] echo
+
++ [scan_waymo_embedded_boxes.sh:45] echo
+
++ [scan_waymo_embedded_boxes.sh:46] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:47] echo METHOD=nocondition_6hz
+METHOD=nocondition_6hz
++ [scan_waymo_embedded_boxes.sh:48] echo CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/configs/nocondition_6hz.yaml
+CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/configs/nocondition_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:49] echo LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/scan_embedded_boxes.log
+LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/scan_embedded_boxes.log
++ [scan_waymo_embedded_boxes.sh:50] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:53] '[' '!' -f /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/configs/nocondition_6hz.yaml ']'
++ [scan_waymo_embedded_boxes.sh:55] echo '[MISSING CONFIG]'
+[MISSING CONFIG]
++ [scan_waymo_embedded_boxes.sh:56] echo /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/configs/nocondition_6hz.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_nocondition_6hz_merged1000_box/configs/nocondition_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:57] echo 'CONTINUE TO NEXT METHOD'
+CONTINUE TO NEXT METHOD
++ [scan_waymo_embedded_boxes.sh:59] continue
++ [scan_waymo_embedded_boxes.sh:33] for METHOD in pvonly_6hz nocondition_6hz plucker_6hz
++ [scan_waymo_embedded_boxes.sh:39] CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/configs/plucker_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:41] LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/scan_embedded_boxes.log
++ [scan_waymo_embedded_boxes.sh:44] echo
+
++ [scan_waymo_embedded_boxes.sh:45] echo
+
++ [scan_waymo_embedded_boxes.sh:46] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:47] echo METHOD=plucker_6hz
+METHOD=plucker_6hz
++ [scan_waymo_embedded_boxes.sh:48] echo CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/configs/plucker_6hz.yaml
+CONFIG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/configs/plucker_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:49] echo LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/scan_embedded_boxes.log
+LOG=/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/scan_embedded_boxes.log
++ [scan_waymo_embedded_boxes.sh:50] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:53] '[' '!' -f /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/configs/plucker_6hz.yaml ']'
++ [scan_waymo_embedded_boxes.sh:55] echo '[MISSING CONFIG]'
+[MISSING CONFIG]
++ [scan_waymo_embedded_boxes.sh:56] echo /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/configs/plucker_6hz.yaml
+/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/sam3_plucker_6hz_merged1000_box/configs/plucker_6hz.yaml
++ [scan_waymo_embedded_boxes.sh:57] echo 'CONTINUE TO NEXT METHOD'
+CONTINUE TO NEXT METHOD
++ [scan_waymo_embedded_boxes.sh:59] continue
++ [scan_waymo_embedded_boxes.sh:113] echo
+
++ [scan_waymo_embedded_boxes.sh:114] echo
+
++ [scan_waymo_embedded_boxes.sh:115] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:116] echo 'ALL METHODS ATTEMPTED'
+ALL METHODS ATTEMPTED
++ [scan_waymo_embedded_boxes.sh:117] echo ====================================================================================================
+====================================================================================================
++ [scan_waymo_embedded_boxes.sh:118] echo 'This script intentionally does not fail-fast.'
+This script intentionally does not fail-fast.
++ [scan_waymo_embedded_boxes.sh:119] echo
+
++ [scan_waymo_embedded_boxes.sh:121] true

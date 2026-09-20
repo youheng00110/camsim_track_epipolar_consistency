@@ -25,6 +25,34 @@ BOX_EDGE_INDICES = (
 )
 
 
+def load_embedded_boxes_from_manifest(
+    manifest_item: dict[str, Any],
+    frame_entry: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return validated boxes embedded in a stflow manifest frame."""
+    boxes = frame_entry.get("boxes_3d", manifest_item.get("boxes_3d", []))
+    if boxes is None:
+        return []
+    if not isinstance(boxes, list):
+        raise TypeError("embedded boxes_3d must be a list")
+    for index, box in enumerate(boxes):
+        if not isinstance(box, dict):
+            raise TypeError(f"boxes_3d[{index}] must be an object")
+        for key in ("gt_id", "class_name", "corners_ref", "coordinate_frame"):
+            if key not in box:
+                raise KeyError(f"embedded boxes_3d[{index}] missing {key!r}")
+        if str(box["coordinate_frame"]).lower() not in {
+            "reference_ego", "reference-ego", "ref_ego"
+        }:
+            raise ValueError("embedded corners_ref boxes must use reference_ego")
+        corners = box["corners_ref"]
+        if not isinstance(corners, list) or len(corners) != 8 or any(
+            not isinstance(point, list) or len(point) != 3 for point in corners
+        ):
+            raise ValueError("embedded corners_ref must have shape [8,3]")
+    return boxes
+
+
 class FrameSourceDataset(Dataset):
     def __init__(self, items: list[dict[str, Any]]) -> None:
         self.items = items
@@ -251,6 +279,16 @@ def load_preview_frames(
                             f"video={video_id}, frame={time_index}"
                         )
 
+                    embedded_boxes = (
+                        load_embedded_boxes_from_manifest(
+                            manifest_item,
+                            frame_entry,
+                        )
+                        if "boxes_3d" in frame_entry
+                        or "boxes_3d" in manifest_item
+                        else None
+                    )
+
                     for view_index, view in enumerate(views):
                         if not isinstance(view, dict):
                             raise TypeError(
@@ -362,6 +400,34 @@ def load_preview_frames(
                                 "preview_is_reference_frame": is_reference,
                             }
                         )
+                        if embedded_boxes is not None:
+                            reference_to_camera = np.asarray(
+                                view.get("T_reference_ego_to_camera"),
+                                dtype=np.float64,
+                            )
+                            if reference_to_camera.shape != (4, 4):
+                                raise ValueError(
+                                    "embedded reference_ego boxes require "
+                                    "view T_reference_ego_to_camera with shape [4,4]"
+                                )
+                            intrinsic_array = np.asarray(
+                                intrinsic,
+                                dtype=np.float64,
+                            )
+                            if intrinsic_array.shape == (4, 4):
+                                intrinsic_array = intrinsic_array[:3, :3]
+                            if intrinsic_array.shape != (3, 3):
+                                raise ValueError(
+                                    "embedded reference_ego boxes require K with shape [3,3]"
+                                )
+                            normalized["boxes_3d"] = embedded_boxes
+                            normalized["T_lidar_to_camera"] = (
+                                reference_to_camera.tolist()
+                            )
+                            normalized["lidar_to_image"] = (
+                                (intrinsic_array @ reference_to_camera[:3, :4]).tolist()
+                            )
+                            normalized["box_coordinate_frame"] = "reference_ego"
                         records.append(normalized)
 
                         if len(records) % 10000 == 0:

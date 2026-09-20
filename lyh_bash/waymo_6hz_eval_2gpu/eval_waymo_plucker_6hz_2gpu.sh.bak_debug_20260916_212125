@@ -1,0 +1,963 @@
+#!/usr/bin/env bash
+
+set +u
+
+source /inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/envs/lyhdwm/bin/activate
+
+
+# ================================================================================================
+# Method
+# ================================================================================================
+
+METHOD="plucker_6hz"
+SOURCE_NAME="plucker_6hz_resume"
+
+
+# 默认使用物理 GPU 0 / 1。
+# 如果以后想用 2 / 3：
+#
+#   BOX_GPU=2 METRIC_GPU=3 bash xxx.sh
+#
+BOX_GPU="${BOX_GPU:-0}"
+METRIC_GPU="${METRIC_GPU:-1}"
+
+
+# ================================================================================================
+# Paths
+# ================================================================================================
+
+CAMSIM_ROOT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim"
+
+OPENDWM_ROOT="${CAMSIM_ROOT}/OpenDWM"
+OPENDWM_SRC="${OPENDWM_ROOT}/src"
+
+WAYMO_ROOT="${CAMSIM_ROOT}/lyh_output/eval/waymo"
+
+SRC_ROOT="${WAYMO_ROOT}/${SOURCE_NAME}"
+
+TARGET_ROOT="${WAYMO_ROOT}/${METHOD}_merged1000"
+
+TARGET_MANIFEST="${TARGET_ROOT}/stflow_manifest.jsonl"
+
+
+# preview 时导出的 3D box 数据。
+# 默认 exporter 会写到：
+#
+#   <eval_frame_export_path>/box/rank_XX/box_manifest.jsonl
+#
+BOX_ROOT="${SRC_ROOT}/box"
+
+
+SAM3_EVAL_ROOT="${CAMSIM_ROOT}/sam3-eval/sam3-eval"
+
+SAM3_ROOT="${WAYMO_ROOT}/sam3_${METHOD}_merged1000_box"
+
+SAM3_CONFIG_DIR="${SAM3_ROOT}/configs"
+
+SAM3_CONFIG="${SAM3_CONFIG_DIR}/${METHOD}.yaml"
+
+SAM3_RESULTS="${SAM3_ROOT}/results"
+
+
+LOG_DIR="${TARGET_ROOT}/eval_logs"
+
+
+# ================================================================================================
+# Checkpoints
+# ================================================================================================
+
+CKPT_ROOT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/ckpt"
+
+RAFT_CHECKPOINT="${CKPT_ROOT}/raft_large_C_T_SKHT_V2-ff5fadd5.pth"
+
+LOFTR_CHECKPOINT="${CKPT_ROOT}/loftr_outdoor.ckpt"
+
+I3D_CHECKPOINT="${CKPT_ROOT}/i3d_pretrained_400.pt"
+
+SAM3_CHECKPOINT="${CKPT_ROOT}/sam3.1/sam3.1_multiplex.pt"
+
+
+MAX_VIDEOS=1000
+
+GATE=16
+
+
+mkdir -p "${LOG_DIR}"
+mkdir -p "${SAM3_CONFIG_DIR}"
+mkdir -p "${SAM3_RESULTS}"
+
+
+# ================================================================================================
+# Environment
+# ================================================================================================
+
+export OMP_NUM_THREADS=1
+
+export TOKENIZERS_PARALLELISM=false
+
+export PYTHONUNBUFFERED=1
+
+export CAMSIM_ROOT
+
+export OPENDWM_ROOT
+
+
+export PYTHONPATH="${OPENDWM_SRC}:${PYTHONPATH:-}"
+
+export PYTHONPATH="${OPENDWM_ROOT}/externals/TATS/tats/fvd:${PYTHONPATH}"
+
+if [ -d "${CAMSIM_ROOT}/nuplan-devkit-master" ]; then
+    export PYTHONPATH="${CAMSIM_ROOT}/nuplan-devkit-master:${PYTHONPATH}"
+fi
+
+if [ -d "${OPENDWM_ROOT}/externals/waymo-open-dataset/src" ]; then
+    export PYTHONPATH="${OPENDWM_ROOT}/externals/waymo-open-dataset/src:${PYTHONPATH}"
+fi
+
+
+export TORCH_HOME=/root/.cache/torch
+
+mkdir -p "${TORCH_HOME}/hub/checkpoints"
+
+
+if [ -f "${RAFT_CHECKPOINT}" ]; then
+    cp -f \
+        "${RAFT_CHECKPOINT}" \
+        "${TORCH_HOME}/hub/checkpoints/raft_large_C_T_SKHT_V2-ff5fadd5.pth"
+fi
+
+
+if [ -f "${LOFTR_CHECKPOINT}" ]; then
+    cp -f \
+        "${LOFTR_CHECKPOINT}" \
+        "${TORCH_HOME}/hub/checkpoints/loftr_outdoor.ckpt"
+fi
+
+
+echo
+echo "===================================================================================================="
+echo "WAYMO 6HZ TWO-GPU EVALUATION"
+echo "===================================================================================================="
+echo "method       = ${METHOD}"
+echo "source       = ${SRC_ROOT}"
+echo "merged       = ${TARGET_ROOT}"
+echo "BOX GPU      = ${BOX_GPU}"
+echo "METRIC GPU   = ${METRIC_GPU}"
+echo
+echo "GPU ${BOX_GPU}: SAM3 / BOX"
+echo "GPU ${METRIC_GPU}: ST-Flow + Traj -> FVD"
+echo "===================================================================================================="
+
+
+# ================================================================================================
+# 0. Basic checks
+# ================================================================================================
+
+if [ ! -d "${SRC_ROOT}" ]; then
+    echo "[ERROR] source root does not exist:"
+    echo "${SRC_ROOT}"
+    exit 1
+fi
+
+
+for FILE in \
+    "${RAFT_CHECKPOINT}" \
+    "${LOFTR_CHECKPOINT}" \
+    "${I3D_CHECKPOINT}" \
+    "${SAM3_CHECKPOINT}"
+do
+    if [ ! -f "${FILE}" ]; then
+        echo "[ERROR] missing checkpoint:"
+        echo "${FILE}"
+        exit 1
+    fi
+done
+
+
+# ================================================================================================
+# 1. Merge first 1000 videos
+#
+# Do not overwrite an already-completed merged1000 directory.
+# ================================================================================================
+
+echo
+echo "===================================================================================================="
+echo "MERGE FIRST 1000"
+echo "===================================================================================================="
+
+
+cd "${OPENDWM_SRC}" || exit 1
+
+
+if [ -f "${TARGET_MANIFEST}" ]; then
+
+    EXISTING_COUNT=$(
+        grep -cve '^[[:space:]]*$' "${TARGET_MANIFEST}"
+    )
+
+    echo "[MERGE] existing manifest:"
+    echo "${TARGET_MANIFEST}"
+    echo "[MERGE] videos=${EXISTING_COUNT}"
+
+    if [ "${EXISTING_COUNT}" -ne 1000 ]; then
+        echo
+        echo "[ERROR] existing merged manifest is not 1000 videos."
+        echo "Remove or rename this directory manually before rerunning:"
+        echo "${TARGET_ROOT}"
+        exit 1
+    fi
+
+    echo "[MERGE] reuse completed merged1000."
+
+else
+
+    if [ -e "${TARGET_ROOT}" ]; then
+        echo "[ERROR] target directory exists but manifest is missing:"
+        echo "${TARGET_ROOT}"
+        echo
+        echo "Refusing to delete it automatically."
+        exit 1
+    fi
+
+    python -m dwm.tools.merge_rank_preview_manifests_interleave \
+        --input-root "${SRC_ROOT}" \
+        --output-root "${TARGET_ROOT}" \
+        --dataset-name waymo \
+        --max-videos 1000 \
+        --overwrite
+
+    MERGE_STATUS=$?
+
+    if [ "${MERGE_STATUS}" -ne 0 ]; then
+        echo "[ERROR] merge failed."
+        exit "${MERGE_STATUS}"
+    fi
+fi
+
+
+# ================================================================================================
+# 2. Validate merged manifest
+# ================================================================================================
+
+MANIFEST_INFO=$(
+python - "${TARGET_MANIFEST}" <<'PY'
+import json
+import os
+import sys
+
+from collections import Counter
+
+
+path = sys.argv[1]
+
+items = []
+
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        if line.strip():
+            items.append(json.loads(line))
+
+
+video_count = len(items)
+
+frame_counts = Counter(
+    len(item.get("frames", []))
+    for item in items
+)
+
+if len(frame_counts) != 1:
+    raise RuntimeError(
+        "inconsistent frame counts: {}".format(
+            dict(frame_counts)
+        )
+    )
+
+sequence_count = next(iter(frame_counts))
+
+
+camera_orders = Counter()
+
+missing_real = 0
+missing_generated = 0
+
+for item in items:
+
+    frames = item.get("frames", [])
+
+    if not frames:
+        raise RuntimeError(
+            "video has no frames: {}".format(
+                item.get("video_id")
+            )
+        )
+
+    camera_order = tuple(
+        str(view.get("camera"))
+        for view in frames[0].get("views", [])
+    )
+
+    camera_orders[camera_order] += 1
+
+    for frame in frames:
+        for view in frame.get("views", []):
+
+            image_path = view.get("image_path")
+            real_path = view.get("real_image_path")
+
+            if not image_path:
+                missing_generated += 1
+
+            if not real_path:
+                missing_real += 1
+
+
+if len(camera_orders) != 1:
+    raise RuntimeError(
+        "inconsistent camera orders: {}".format(
+            dict(camera_orders)
+        )
+    )
+
+
+camera_names = next(iter(camera_orders))
+
+
+print(video_count)
+
+print(sequence_count)
+
+print(",".join(camera_names))
+
+print(missing_generated)
+
+print(missing_real)
+PY
+)
+
+INFO_STATUS=$?
+
+if [ "${INFO_STATUS}" -ne 0 ]; then
+    echo "[ERROR] manifest validation failed."
+    exit "${INFO_STATUS}"
+fi
+
+
+VIDEO_COUNT=$(echo "${MANIFEST_INFO}" | sed -n '1p')
+
+SEQ_COUNT=$(echo "${MANIFEST_INFO}" | sed -n '2p')
+
+CAMERAS=$(echo "${MANIFEST_INFO}" | sed -n '3p')
+
+MISSING_GENERATED=$(echo "${MANIFEST_INFO}" | sed -n '4p')
+
+MISSING_REAL=$(echo "${MANIFEST_INFO}" | sed -n '5p')
+
+
+echo
+echo "===================================================================================================="
+echo "MERGED MANIFEST INFO"
+echo "===================================================================================================="
+echo "videos             = ${VIDEO_COUNT}"
+echo "frames/video       = ${SEQ_COUNT}"
+echo "cameras            = ${CAMERAS}"
+echo "missing generated  = ${MISSING_GENERATED}"
+echo "missing pairedreal = ${MISSING_REAL}"
+
+
+if [ "${VIDEO_COUNT}" -ne 1000 ]; then
+    echo "[ERROR] expected exactly 1000 videos."
+    exit 1
+fi
+
+
+if [ "${MISSING_GENERATED}" -ne 0 ]; then
+    echo "[ERROR] generated image_path is missing."
+    exit 1
+fi
+
+
+if [ "${MISSING_REAL}" -ne 0 ]; then
+    echo "[ERROR] paired-real path is missing; FVD would be invalid."
+    exit 1
+fi
+
+
+# ================================================================================================
+# 3. Find Waymo SAM3 config template
+#
+# Preferred:
+#
+#   WAYMO_SAM_TEMPLATE=/path/to/config.yaml bash this_script.sh
+#
+# Otherwise automatically search known locations.
+# ================================================================================================
+
+find_waymo_sam_template()
+{
+    if [ -n "${WAYMO_SAM_TEMPLATE:-}" ]; then
+
+        if [ -f "${WAYMO_SAM_TEMPLATE}" ]; then
+            echo "${WAYMO_SAM_TEMPLATE}"
+            return 0
+        fi
+
+        return 1
+    fi
+
+
+    for CANDIDATE in \
+        "${SAM3_EVAL_ROOT}/config_shared_box_waymo.yaml" \
+        "${SAM3_EVAL_ROOT}/config_waymo_shared_box.yaml" \
+        "${SAM3_EVAL_ROOT}/config_waymo.yaml"
+    do
+        if [ -f "${CANDIDATE}" ]; then
+            echo "${CANDIDATE}"
+            return 0
+        fi
+    done
+
+
+    CANDIDATE=$(
+        find "${WAYMO_ROOT}" \
+            -type f \
+            -path '*/configs/*.yaml' \
+            2>/dev/null \
+        | grep -i waymo \
+        | head -n 1
+    )
+
+    if [ -n "${CANDIDATE}" ] && [ -f "${CANDIDATE}" ]; then
+        echo "${CANDIDATE}"
+        return 0
+    fi
+
+
+    return 1
+}
+
+
+SAM_TEMPLATE="$(find_waymo_sam_template)"
+
+SAM_TEMPLATE_STATUS=$?
+
+
+if [ "${SAM_TEMPLATE_STATUS}" -eq 0 ]; then
+
+    echo
+    echo "[SAM3] Waymo template:"
+    echo "${SAM_TEMPLATE}"
+
+else
+
+    echo
+    echo "[SAM3 WARNING]"
+    echo "No Waymo shared-box SAM3 template was auto-discovered."
+    echo
+    echo "ST-Flow + FVD on GPU ${METRIC_GPU} will still run."
+    echo
+    echo "GPU ${BOX_GPU} box worker will stop."
+    echo
+    echo "If you already have a Waymo SAM3 config, launch with:"
+    echo
+    echo "WAYMO_SAM_TEMPLATE=/path/to/waymo.yaml bash $0"
+    echo
+
+    SAM_TEMPLATE=""
+fi
+
+
+# ================================================================================================
+# 4. GPU BOX — SAM3 / box
+# ================================================================================================
+
+(
+    export CUDA_VISIBLE_DEVICES="${BOX_GPU}"
+
+
+    echo
+    echo "===================================================================================================="
+    echo "[GPU ${BOX_GPU}] SAM3 / BOX"
+    echo "===================================================================================================="
+
+
+    if [ -z "${SAM_TEMPLATE}" ]; then
+        echo "[GPU ${BOX_GPU}] skipped: no Waymo SAM3 template."
+        exit 20
+    fi
+
+
+    if [ ! -d "${BOX_ROOT}" ]; then
+        echo "[GPU ${BOX_GPU}] missing exported box root:"
+        echo "${BOX_ROOT}"
+        exit 21
+    fi
+
+
+    BOX_MANIFEST_COUNT=$(
+        find "${BOX_ROOT}" \
+            -type f \
+            -name 'box_manifest.jsonl' \
+            | wc -l
+    )
+
+
+    echo "box root      = ${BOX_ROOT}"
+    echo "box manifests = ${BOX_MANIFEST_COUNT}"
+
+
+    if [ "${BOX_MANIFEST_COUNT}" -eq 0 ]; then
+        echo "[GPU ${BOX_GPU}] no box_manifest.jsonl found."
+        exit 22
+    fi
+
+
+    # --------------------------------------------------------------------------------------------
+    # Build method-specific config from the existing Waymo SAM3 template.
+    #
+    # Keep all Waymo-specific:
+    #   prompts
+    #   classes
+    #   matching thresholds
+    #   geometry semantics
+    #
+    # Only replace:
+    #   preview root
+    #   shared box root
+    #   checkpoint/repo
+    #   output
+    #   source definitions
+    # --------------------------------------------------------------------------------------------
+
+    SAM_TEMPLATE="${SAM_TEMPLATE}" \
+    SAM3_CONFIG="${SAM3_CONFIG}" \
+    TARGET_ROOT="${TARGET_ROOT}" \
+    BOX_ROOT="${BOX_ROOT}" \
+    SAM3_RESULTS="${SAM3_RESULTS}" \
+    SAM3_EVAL_ROOT="${SAM3_EVAL_ROOT}" \
+    SAM3_CHECKPOINT="${SAM3_CHECKPOINT}" \
+    python - <<'PY'
+import os
+from pathlib import Path
+
+import yaml
+
+
+src = Path(
+    os.environ["SAM_TEMPLATE"]
+)
+
+dst = Path(
+    os.environ["SAM3_CONFIG"]
+)
+
+target_root = str(
+    Path(
+        os.environ["TARGET_ROOT"]
+    ).resolve()
+)
+
+box_root = str(
+    Path(
+        os.environ["BOX_ROOT"]
+    ).resolve()
+)
+
+output_dir = str(
+    Path(
+        os.environ["SAM3_RESULTS"]
+    ).resolve()
+)
+
+sam3_eval_root = Path(
+    os.environ["SAM3_EVAL_ROOT"]
+).resolve()
+
+checkpoint = str(
+    Path(
+        os.environ["SAM3_CHECKPOINT"]
+    ).resolve()
+)
+
+
+config = yaml.safe_load(
+    src.read_text(
+        encoding="utf-8"
+    )
+)
+
+if not isinstance(config, dict):
+    raise RuntimeError(
+        "SAM3 template is not a YAML dictionary"
+    )
+
+
+paths = config.setdefault(
+    "paths",
+    {},
+)
+
+paths["preview_root"] = target_root
+
+paths["shared_box_root"] = box_root
+
+paths["sam3_repo"] = str(
+    sam3_eval_root / "sam3"
+)
+
+paths["checkpoint"] = checkpoint
+
+paths["output_dir"] = output_dir
+
+
+preview = config.setdefault(
+    "preview",
+    {},
+)
+
+# TARGET_ROOT itself has exactly one merged manifest.
+preview["manifest_glob"] = "stflow_manifest.jsonl"
+
+preview["skip_reference_frames"] = True
+
+preview["strict_paths"] = True
+
+preview["include_methods"] = []
+
+preview["exclude_methods"] = []
+
+
+# Evaluate generated and its paired-real using exactly
+# the same merged1000 manifest and shared box geometry.
+config["sources"] = {
+    "generated": {
+        "type": "preview_generated",
+        "group_by_manifest": False,
+    },
+    "pairedreal": {
+        "type": "preview_real",
+        "group_by_manifest": False,
+    },
+}
+
+
+runtime = config.setdefault(
+    "runtime",
+    {},
+)
+
+runtime["limit_frames"] = 0
+
+runtime["overwrite"] = True
+
+
+dst.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+dst.write_text(
+    yaml.safe_dump(
+        config,
+        allow_unicode=True,
+        sort_keys=False,
+    ),
+    encoding="utf-8",
+)
+
+
+print("SAM template     =", src)
+print("SAM config       =", dst)
+print("preview_root     =", paths["preview_root"])
+print("shared_box_root  =", paths["shared_box_root"])
+print("output_dir       =", paths["output_dir"])
+print("sources          =", list(config["sources"].keys()))
+
+print(
+    "projection classes =",
+    config.get(
+        "projection",
+        {},
+    ).get(
+        "classes",
+        "<from template/default>"
+    ),
+)
+
+print(
+    "prompts =",
+    config.get(
+        "model",
+        {},
+    ).get(
+        "prompts",
+        "<from template/default>"
+    ),
+)
+PY
+
+    CONFIG_STATUS=$?
+
+
+    if [ "${CONFIG_STATUS}" -ne 0 ]; then
+        echo "[GPU ${BOX_GPU}] failed to construct SAM3 config."
+        exit "${CONFIG_STATUS}"
+    fi
+
+
+    cd "${SAM3_EVAL_ROOT}" || exit 1
+
+    export PYTHONPATH="${SAM3_EVAL_ROOT}/sam3:${PYTHONPATH:-}"
+
+
+    SAM3_SCAN_LOG="${SAM3_ROOT}/sam3_scan.log"
+
+    SAM3_RUN_LOG="${SAM3_ROOT}/sam3_box.log"
+
+
+    echo
+    echo "----------------------------------------------------------------------------------------------------"
+    echo "[GPU ${BOX_GPU}] SAM3 SCAN"
+    echo "----------------------------------------------------------------------------------------------------"
+
+
+    python -u run_eval.py \
+        --config "${SAM3_CONFIG}" \
+        --scan-only \
+        2>&1 | tee "${SAM3_SCAN_LOG}"
+
+    SCAN_STATUS=${PIPESTATUS[0]}
+
+
+    if [ "${SCAN_STATUS}" -ne 0 ]; then
+        echo "[GPU ${BOX_GPU}] SAM3 scan failed."
+        exit "${SCAN_STATUS}"
+    fi
+
+
+    echo
+    echo "----------------------------------------------------------------------------------------------------"
+    echo "[GPU ${BOX_GPU}] SAM3 FULL BOX EVAL"
+    echo "----------------------------------------------------------------------------------------------------"
+
+
+    python -u run_eval.py \
+        --config "${SAM3_CONFIG}" \
+        2>&1 | tee "${SAM3_RUN_LOG}"
+
+    SAM_STATUS=${PIPESTATUS[0]}
+
+
+    if [ "${SAM_STATUS}" -ne 0 ]; then
+        echo "[GPU ${BOX_GPU}] SAM3 failed."
+        exit "${SAM_STATUS}"
+    fi
+
+
+    echo
+    echo "[GPU ${BOX_GPU}] SAM3 DONE"
+    echo "results = ${SAM3_RESULTS}"
+
+    exit 0
+
+) &
+
+BOX_PID=$!
+
+
+# ================================================================================================
+# 5. GPU METRIC — ST-Flow + Traj, then FVD
+# ================================================================================================
+
+(
+    export CUDA_VISIBLE_DEVICES="${METRIC_GPU}"
+
+
+    cd "${OPENDWM_SRC}" || exit 1
+
+
+    STFLOW_OUTPUT="${TARGET_ROOT}/stflow_traj_result_gate16.json"
+
+    STFLOW_LOG="${LOG_DIR}/stflow_gate16.log"
+
+
+    FVD_OUTPUT="${TARGET_ROOT}/paired_fvd_result_all${SEQ_COUNT}.json"
+
+    FVD_LOG="${LOG_DIR}/fvd_all${SEQ_COUNT}.log"
+
+
+    echo
+    echo "===================================================================================================="
+    echo "[GPU ${METRIC_GPU}] ST-FLOW + TRAJECTORY"
+    echo "===================================================================================================="
+    echo "manifest = ${TARGET_MANIFEST}"
+    echo "videos   = ${VIDEO_COUNT}"
+    echo "gate     = ${GATE}"
+    echo "cameras  = ${CAMERAS}"
+
+
+    python -m dwm.tools.evaluate_stflow \
+        --manifest "${TARGET_MANIFEST}" \
+        --output "${STFLOW_OUTPUT}" \
+        --device cuda \
+        --max-videos "${VIDEO_COUNT}" \
+        --frame-stride 2 \
+        --min-matches 16 \
+        --max-matches 256 \
+        --loftr-confidence 0.1 \
+        --pair-policy dataset \
+        --cross-gate-px "${GATE}" \
+        2>&1 | tee "${STFLOW_LOG}"
+
+    STFLOW_STATUS=${PIPESTATUS[0]}
+
+
+    if [ "${STFLOW_STATUS}" -ne 0 ]; then
+        echo "[GPU ${METRIC_GPU}] ST-Flow failed."
+        echo "[GPU ${METRIC_GPU}] FVD will not start."
+        exit "${STFLOW_STATUS}"
+    fi
+
+
+    echo
+    echo "===================================================================================================="
+    echo "[GPU ${METRIC_GPU}] FVD"
+    echo "===================================================================================================="
+    echo "videos         = ${VIDEO_COUNT}"
+    echo "sequence_count = ${SEQ_COUNT}"
+    echo "camera_names   = ${CAMERAS}"
+
+
+    python -m dwm.tools.evaluate_fvd_from_paired_manifest \
+        --manifest "${TARGET_MANIFEST}" \
+        --output "${FVD_OUTPUT}" \
+        --i3d-checkpoint "${I3D_CHECKPOINT}" \
+        --device cuda \
+        --max-videos "${VIDEO_COUNT}" \
+        --sequence-count "${SEQ_COUNT}" \
+        --camera-names "${CAMERAS}" \
+        --batch-size 2 \
+        2>&1 | tee "${FVD_LOG}"
+
+    FVD_STATUS=${PIPESTATUS[0]}
+
+
+    if [ "${FVD_STATUS}" -ne 0 ]; then
+
+        echo
+        echo "[GPU ${METRIC_GPU}] FVD batch-size=2 failed."
+        echo "[GPU ${METRIC_GPU}] retry batch-size=1."
+
+
+        python -m dwm.tools.evaluate_fvd_from_paired_manifest \
+            --manifest "${TARGET_MANIFEST}" \
+            --output "${FVD_OUTPUT}" \
+            --i3d-checkpoint "${I3D_CHECKPOINT}" \
+            --device cuda \
+            --max-videos "${VIDEO_COUNT}" \
+            --sequence-count "${SEQ_COUNT}" \
+            --camera-names "${CAMERAS}" \
+            --batch-size 1 \
+            2>&1 | tee -a "${FVD_LOG}"
+
+        FVD_STATUS=${PIPESTATUS[0]}
+    fi
+
+
+    if [ "${FVD_STATUS}" -ne 0 ]; then
+        echo "[GPU ${METRIC_GPU}] FVD failed."
+        exit "${FVD_STATUS}"
+    fi
+
+
+    echo
+    echo "===================================================================================================="
+    echo "[GPU ${METRIC_GPU}] METRICS DONE"
+    echo "===================================================================================================="
+    echo "STFlow = ${STFLOW_OUTPUT}"
+    echo "FVD    = ${FVD_OUTPUT}"
+
+    exit 0
+
+) &
+
+METRIC_PID=$!
+
+
+# ================================================================================================
+# 6. Wait
+# ================================================================================================
+
+echo
+echo "===================================================================================================="
+echo "WORKERS STARTED"
+echo "===================================================================================================="
+echo "method       = ${METHOD}"
+echo "GPU ${BOX_GPU} BOX PID       = ${BOX_PID}"
+echo "GPU ${METRIC_GPU} METRIC PID = ${METRIC_PID}"
+echo
+
+
+wait "${BOX_PID}"
+
+BOX_STATUS=$?
+
+
+wait "${METRIC_PID}"
+
+METRIC_STATUS=$?
+
+
+echo
+echo "===================================================================================================="
+echo "FINAL STATUS — ${METHOD}"
+echo "===================================================================================================="
+echo "SAM3 / BOX   = ${BOX_STATUS}"
+echo "STFlow + FVD = ${METRIC_STATUS}"
+
+
+echo
+echo "===================================================================================================="
+echo "RESULTS"
+echo "===================================================================================================="
+
+echo
+echo "Merged:"
+echo "${TARGET_ROOT}"
+
+echo
+echo "STFlow:"
+echo "${TARGET_ROOT}/stflow_traj_result_gate16.json"
+
+echo
+echo "FVD:"
+echo "${TARGET_ROOT}/paired_fvd_result_all${SEQ_COUNT}.json"
+
+echo
+echo "SAM3:"
+echo "${SAM3_RESULTS}"
+
+
+if [ -f "${SAM3_RESULTS}/generated/summary.json" ]; then
+    echo
+    echo "SAM3 generated summary:"
+    echo "${SAM3_RESULTS}/generated/summary.json"
+fi
+
+
+if [ -f "${SAM3_RESULTS}/pairedreal/summary.json" ]; then
+    echo
+    echo "SAM3 pairedreal summary:"
+    echo "${SAM3_RESULTS}/pairedreal/summary.json"
+fi
+
+
+if [ "${BOX_STATUS}" -ne 0 ] || [ "${METRIC_STATUS}" -ne 0 ]; then
+    echo
+    echo "[ERROR] at least one evaluation worker failed."
+    exit 1
+fi
+
+
+echo
+echo "ALL DONE: ${METHOD}"
+

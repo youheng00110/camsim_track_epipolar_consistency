@@ -170,7 +170,6 @@
                 "angle",
                 "dist"
             ],
-            "evaluation_item_count": 480,
             "eval_frame_export_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/plucker_6hz_resume",
             "eval_frame_dataset_name": "waymo",
             "eval_frame_manifest_name": "stflow_manifest.jsonl",
@@ -921,7 +920,7 @@
                     "fps_stride_tuples": [
                         [
                             6,
-                            9
+                            3
                         ]
                     ],
                     "sensor_channels": [

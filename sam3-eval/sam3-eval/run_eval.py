@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import random
@@ -43,30 +44,38 @@ def initialize_runtime() -> tuple[int, int, int, torch.device]:
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    if world_size > 1 and not distributed.is_initialized():
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-        distributed.init_process_group(backend=backend, init_method="env://")
     if torch.cuda.is_available():
         torch.cuda.set_device(local_rank)
+    if world_size > 1 and not distributed.is_initialized():
+        distributed.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            timeout=datetime.timedelta(hours=2),
+        )
+    if torch.cuda.is_available():
         device = torch.device("cuda", local_rank)
     else:
         device = torch.device("cpu")
     return rank, world_size, local_rank, device
 
 
-def finalize_runtime(world_size: int) -> None:
+def finalize_runtime(world_size: int, local_rank: int) -> None:
     if world_size > 1 and distributed.is_initialized():
-        distributed.barrier()
+        distributed.barrier(device_ids=[local_rank])
         distributed.destroy_process_group()
 
 
-def prepare_output_directory(config: dict[str, Any], rank: int) -> Path:
+def prepare_output_directory(
+    config: dict[str, Any],
+    rank: int,
+    local_rank: int,
+) -> Path:
     output_dir = Path(config["paths"]["output_dir"]).expanduser().resolve()
     overwrite = bool(config.get("runtime", {}).get("overwrite", True))
     if rank == 0 and overwrite and output_dir.is_dir():
         shutil.rmtree(output_dir)
     if int(os.environ.get("WORLD_SIZE", "1")) > 1 and distributed.is_initialized():
-        distributed.barrier()
+        distributed.barrier(device_ids=[local_rank])
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "visualizations").mkdir(parents=True, exist_ok=True)
     return output_dir
@@ -142,7 +151,7 @@ def main() -> None:
     if args.resume:
         config.setdefault("runtime", {})["overwrite"] = False
 
-    rank, world_size, _, device = initialize_runtime()
+    rank, world_size, local_rank, device = initialize_runtime()
     try:
         seed = int(config.get("runtime", {}).get("seed", 3407)) + rank
         random.seed(seed)
@@ -198,7 +207,7 @@ def main() -> None:
             world_size,
         )
 
-        output_dir = prepare_output_directory(config, rank)
+        output_dir = prepare_output_directory(config, rank, local_rank)
         rank_output = output_dir / f"records.rank{rank:03d}.jsonl"
 
         completed_records = 0
@@ -369,13 +378,13 @@ def main() -> None:
                         visualization_counts[source_name] = current_count + 1
 
         if world_size > 1 and distributed.is_initialized():
-            distributed.barrier()
+            distributed.barrier(device_ids=[local_rank])
         if rank == 0:
             summary = aggregate_rank_outputs(output_dir, world_size, model_info)
             print(json.dumps(summary, ensure_ascii=False, indent=2))
             print(f"Results saved to {output_dir}")
     finally:
-        finalize_runtime(world_size)
+        finalize_runtime(world_size, local_rank)
 
 
 if __name__ == "__main__":
