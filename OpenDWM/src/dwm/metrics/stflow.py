@@ -48,7 +48,25 @@ class STFlowEvaluator:
             )
 
             weights = Raft_Large_Weights.DEFAULT
-            model = raft_large(weights=weights, progress=True).to(self.device).eval()
+            local_weights_path = os.environ.get(
+                "DWM_RAFT_WEIGHTS",
+                "/inspire/qb-ilm/project/quantum-artificial-intelligence/"
+                "yanjunchi-24040/songbur/pretrain/ckpt/"
+                "raft_large_C_T_SKHT_V2-ff5fadd5.pth",
+            )
+            if os.path.isfile(local_weights_path):
+                model = raft_large(weights=None, progress=False)
+                checkpoint = torch.load(
+                    local_weights_path,
+                    map_location="cpu",
+                    weights_only=True,
+                )
+                if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+                    checkpoint = checkpoint["state_dict"]
+                model.load_state_dict(checkpoint, strict=True)
+            else:
+                model = raft_large(weights=weights, progress=True)
+            model = model.to(self.device).eval()
             return model, weights
         except Exception as exc:
             raise RuntimeError(
@@ -999,4 +1017,3 @@ class STFlowEvaluator:
             }
         )
         return summary
-

@@ -10,11 +10,12 @@ OPENDWM_ROOT="${CAMSIM_ROOT}/OpenDWM"
 OPENDWM_SRC="${OPENDWM_ROOT}/src"
 WAYMO_ROOT="${CAMSIM_ROOT}/lyh_output/eval/waymo"
 CKPT_ROOT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/ckpt"
+RAFT_CHECKPOINT="${CKPT_ROOT}/raft_large_C_T_SKHT_V2-ff5fadd5.pth"
+LOFTR_CHECKPOINT="${CKPT_ROOT}/loftr_outdoor.ckpt"
 I3D_CHECKPOINT="${CKPT_ROOT}/i3d_pretrained_400.pt"
-export DWM_RAFT_WEIGHTS="${CKPT_ROOT}/raft_large_C_T_SKHT_V2-ff5fadd5.pth"
+export DWM_RAFT_WEIGHTS="${RAFT_CHECKPOINT}"
 
-GPU_IMPLICIT="${GPU_IMPLICIT:-0}"
-GPU_PETR="${GPU_PETR:-1}"
+GPU="${GPU:-0}"
 MAX_VIDEOS="${MAX_VIDEOS:-1000}"
 GATE="${GATE:-16}"
 
@@ -30,6 +31,8 @@ fi
 if [ -d "${OPENDWM_ROOT}/externals/waymo-open-dataset/src" ]; then
   export PYTHONPATH="${OPENDWM_ROOT}/externals/waymo-open-dataset/src:${PYTHONPATH}"
 fi
+
+export TORCH_HOME="${TORCH_HOME:-/root/.cache/torch}"
 
 mkdir -p "${WAYMO_ROOT}"
 
@@ -169,32 +172,44 @@ if [ ! -f "${I3D_CHECKPOINT}" ]; then
   echo "[ERROR] missing I3D checkpoint: ${I3D_CHECKPOINT}"
   exit 1
 fi
-if [ ! -f "${DWM_RAFT_WEIGHTS}" ]; then
-  echo "[ERROR] missing local RAFT checkpoint: ${DWM_RAFT_WEIGHTS}"
+if [ ! -f "${RAFT_CHECKPOINT}" ]; then
+  echo "[ERROR] missing local RAFT checkpoint: ${RAFT_CHECKPOINT}"
+  exit 1
+fi
+if [ ! -f "${LOFTR_CHECKPOINT}" ]; then
+  echo "[ERROR] missing local LoFTR checkpoint: ${LOFTR_CHECKPOINT}"
   exit 1
 fi
 
+mkdir -p "${TORCH_HOME}/hub/checkpoints"
+cp -f "${RAFT_CHECKPOINT}" \
+  "${TORCH_HOME}/hub/checkpoints/raft_large_C_T_SKHT_V2-ff5fadd5.pth"
+cp -f "${LOFTR_CHECKPOINT}" \
+  "${TORCH_HOME}/hub/checkpoints/loftr_outdoor.ckpt"
+
 cd "${OPENDWM_SRC}" || exit 1
+merge_one box
+S0=$?
 merge_one implicit
 S1=$?
 merge_one petr
 S2=$?
-if [ "${S1}" -ne 0 ] || [ "${S2}" -ne 0 ]; then
-  echo "[ERROR] merge failed implicit=${S1} petr=${S2}"
+if [ "${S0}" -ne 0 ] || [ "${S1}" -ne 0 ] || [ "${S2}" -ne 0 ]; then
+  echo "[ERROR] merge failed box=${S0} implicit=${S1} petr=${S2}"
   exit 1
 fi
 
-# Create log directories before shell redirection starts worker processes.
+# Single-GPU mode: create log directories before redirection and run strictly in order.
 mkdir -p \
+  "${WAYMO_ROOT}/box_6hz_18000_1000_merged1000/eval_logs" \
   "${WAYMO_ROOT}/implicit_6hz_18000_1000_merged1000/eval_logs" \
   "${WAYMO_ROOT}/petr_6hz_18000_1000_merged1000/eval_logs"
 
-# Each method owns one GPU; STFlow then FVD run sequentially on that GPU.
-evaluate_one implicit "${GPU_IMPLICIT}" >"${WAYMO_ROOT}/implicit_6hz_18000_1000_merged1000/eval_logs/worker.log" 2>&1 &
-P1=$!
-evaluate_one petr "${GPU_PETR}" >"${WAYMO_ROOT}/petr_6hz_18000_1000_merged1000/eval_logs/worker.log" 2>&1 &
-P2=$!
-wait "${P1}"; S1=$?
-wait "${P2}"; S2=$?
-echo "[FINAL] implicit=${S1} petr=${S2}"
-[ "${S1}" -eq 0 ] && [ "${S2}" -eq 0 ]
+evaluate_one box "${GPU}" 2>&1 | tee "${WAYMO_ROOT}/box_6hz_18000_1000_merged1000/eval_logs/worker.log"
+S0=${PIPESTATUS[0]}
+evaluate_one implicit "${GPU}" 2>&1 | tee "${WAYMO_ROOT}/implicit_6hz_18000_1000_merged1000/eval_logs/worker.log"
+S1=${PIPESTATUS[0]}
+evaluate_one petr "${GPU}" 2>&1 | tee "${WAYMO_ROOT}/petr_6hz_18000_1000_merged1000/eval_logs/worker.log"
+S2=${PIPESTATUS[0]}
+echo "[FINAL] box=${S0} implicit=${S1} petr=${S2}"
+[ "${S0}" -eq 0 ] && [ "${S1}" -eq 0 ] && [ "${S2}" -eq 0 ]
