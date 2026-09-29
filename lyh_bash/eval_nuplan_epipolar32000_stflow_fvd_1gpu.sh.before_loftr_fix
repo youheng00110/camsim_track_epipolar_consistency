@@ -15,25 +15,14 @@ export CUDA_VISIBLE_DEVICES="${GPU:-0}"
 [[ "$CUDA_VISIBLE_DEVICES" != *,* && -n "$CUDA_VISIBLE_DEVICES" ]] || { echo 'GPU must select exactly one device'; exit 1; }
 export OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false
 export DWM_RAFT_WEIGHTS="${CKPT_ROOT}/raft_large_C_T_SKHT_V2-ff5fadd5.pth"
-export TORCH_HOME="${EVAL_ROOT}/.torch_cache_epipolar32000"
 export PYTHONPATH="${OPENDWM_ROOT}/src:${OPENDWM_ROOT}/externals/TATS/tats/fvd:${CAMSIM_ROOT}/nuplan-devkit-master:${PYTHONPATH:-}"
 export SRC_ROOT TARGET_ROOT EVAL_ROOT
-for weight in "$DWM_RAFT_WEIGHTS" "${CKPT_ROOT}/i3d_pretrained_400.pt" "${CKPT_ROOT}/loftr_outdoor.ckpt"; do
+for weight in "$DWM_RAFT_WEIGHTS" "${CKPT_ROOT}/i3d_pretrained_400.pt"; do
   [[ -s "$weight" ]] || { echo "Missing weight: $weight"; exit 1; }
 done
 cd "${OPENDWM_ROOT}/src"
 exec 9>"${TARGET_ROOT}.eval.lock"
 flock -n 9 || { echo 'Another merge/evaluation already holds this lock'; exit 1; }
-mkdir -p "${TORCH_HOME}/hub/checkpoints"
-cp "${CKPT_ROOT}/loftr_outdoor.ckpt" "${TORCH_HOME}/hub/checkpoints/loftr_outdoor.ckpt"
-# Exercise the actual weight-loading path while forbidding downloads.
-python - <<'PY'
-from unittest.mock import patch
-from kornia.feature import LoFTR
-with patch('torch.hub.download_url_to_file', side_effect=RuntimeError('Offline weight cache missing')):
-    model = LoFTR(pretrained='outdoor').eval()
-print('[CHECK] LoFTR outdoor loaded from local cache, downloads disabled')
-PY
 
 python - <<'PY'
 import json, os

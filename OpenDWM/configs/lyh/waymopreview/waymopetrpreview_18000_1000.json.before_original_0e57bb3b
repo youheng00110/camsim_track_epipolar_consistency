@@ -143,7 +143,7 @@
         "dist",
         "3dbox_records"
       ],
-      "eval_frame_export_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/petr_6hz_18000_1000_original_0e57bb3b",
+      "eval_frame_export_path": "/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/eval/waymo/petr_6hz_18000_1000",
       "eval_frame_dataset_name": "waymo",
       "eval_frame_manifest_name": "stflow_manifest.jsonl",
       "eval_frame_export_paired_real": true,

@@ -19,18 +19,18 @@ export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanju
 export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/nuplan-devkit-master:$PYTHONPATH"
 export PYTHONPATH="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/externals/waymo-open-dataset/src:$PYTHONPATH"
 
-CONFIG="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/configs/lyh/waymopreview/waymopetrpreview_18000_1000.json"
-OUTPUT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/waymo_preview/petr_6hz_18000_1000_original_0e57bb3b"
+CONFIG="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/OpenDWM/configs/lyh/waymopreview/waymotvpreview_30000_1000.json"
+OUTPUT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/camsim/lyh_output/waymo_preview/tv_6hz_30000_1000"
 
-echo "Starting Waymo PETR 18000 preview (target 1000)"
+echo "Starting Waymo TV 30000 preview (target 1000)"
 echo "CONFIG=${CONFIG}"
 echo "OUTPUT=${OUTPUT}"
 
 # Verify the original training checkpoint before starting four GPU workers.
-CHECKPOINT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/ckpt/waymo/train_waymopetr/18000.pth"
-EXPECTED_SHA256="0e57bb3b2cd3edc31096d1b03fe142a021d6e87ddf8036a0be71376b688bec45"
+CHECKPOINT="/inspire/qb-ilm/project/quantum-artificial-intelligence/yanjunchi-24040/songbur/pretrain/ckpt/waymo/tv/30000.pth"
+EXPECTED_SHA256="2a875921a7533d4bd08decddddd2a76e6429c850d5c70224b1046c4180b107f0"
 printf '%s  %s\n' "${EXPECTED_SHA256}" "${CHECKPOINT}" | sha256sum --check --status || {
-  echo "ERROR: PETR checkpoint does not match verified original 18000.pth" >&2
+  echo "ERROR: TV checkpoint does not match verified original 30000.pth" >&2
   exit 1
 }
 
@@ -41,5 +41,5 @@ torchrun \
   -c "${CONFIG}" \
   -o "${OUTPUT}"
 STATUS=$?
-echo "Waymo PETR preview status=${STATUS}"
+echo "Waymo TV preview status=${STATUS}"
 exit "${STATUS}"
